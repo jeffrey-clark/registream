@@ -4,8 +4,8 @@ d Module to label and manage register data efficiently
 d Author(s): Jeffrey Clark, Jie Wen
 d Requires Stata 16
 d
-d Version: {{VERSION}}  // Placeholder
-d Distribution-Date: {{DATE}}  // Placeholder
+d Version: {{VERSION}}
+d Distribution-Date: {{DATE}}
 d Support: email jeffrey.clark@su.se
 f autolabel.ado
 f autolabel.sthlp
