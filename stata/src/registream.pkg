@@ -1,0 +1,18 @@
+v 3
+d RegiStream: Streamline Your Register Data Workflow
+d Module to label and manage register data efficiently
+d Author(s): Jeffrey Clark, Jie Wen
+d Requires Stata 16
+d
+d Version: {{VERSION}}  // Placeholder
+d Distribution-Date: {{DATE}}  // Placeholder
+d Support: email jeffrey.clark@su.se
+f autolabel.ado
+f autolabel.sthlp
+f _rs_append_csv_files.ado
+f _rs_confirmdir.ado
+f _rs_del_folder_rec.ado
+f _rs_download_extract.ado
+f _rs_escape_ascii.ado
+f _rs_summarize_dataset.ado
+f registream.sthlp
