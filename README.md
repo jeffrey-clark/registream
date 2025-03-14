@@ -8,6 +8,21 @@ RegiStream is a multi-platform toolkit for working with register data in **Stata
 It provides a **consistent framework** to help researchers efficiently process, label, and analyze register data.
 
 
+
+## Version Log
+
+| Version  | Stata Status | R Status  | Python Status  | Key Features |
+|----------|-------------|-----------|---------------|--------------|
+| **1.0.0** | ✅ Released | ⏳ Planned | ⏳ Planned | `autolabel` and `label` functionality |
+| **1.0.1** | ⏳ Planned  | ❌ Not yet | ❌ Not yet | Automatic check for updates |
+
+
+- ✅ = Released  
+- ⏳ = Planned  
+- ❌ = Not yet implemented  
+
+
+
 ## Project Structure
 
 ```
