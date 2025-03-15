@@ -3,69 +3,141 @@ import pandas as pd
 from .label_fetcher import LabelFetcher
 from tqdm import tqdm
 
-@pd.api.extensions.register_dataframe_accessor("rs")
-class RegiStreamAccessor:
+# Main function to apply labels to a DataFrame
+def autolabel(df, label_type='variables', domain='scb', lang='eng', variables="*", verbose=True):
+    """
+    Apply variable and value labels to a pandas DataFrame.
+    
+    Parameters:
+    -----------
+    df : pandas.DataFrame
+        The DataFrame to label
+    label_type : str, default 'variables'
+        Type of labels to apply ('variables' or 'values')
+    domain : str, default 'scb'
+        The domain to search for variables
+    lang : str, default 'eng'
+        Language for variable descriptions ('eng' or 'swe')
+    variables : list or str, default "*"
+        List of variables to label or "*" for all
+    verbose : bool, default True
+        Whether to print progress information
+        
+    Returns:
+    --------
+    pandas.DataFrame
+        The original DataFrame with labels applied
+        
+    Notes:
+    ------
+    The directory for label files is determined by:
+    1. The REGISTREAM_DIR environment variable if set
+    2. Default platform-specific location otherwise:
+       - Windows: C:\\Users\\<username>\\AppData\\Local\\registream\\autolabel_keys\\
+       - macOS/Linux: ~/.registream/autolabel_keys/
+    """
+    # Initialize the labels in the attrs dictionary if they don't exist
+    if 'registream_labels' not in df.attrs:
+        df.attrs['registream_labels'] = {'variable_labels': {}, 'value_labels': {}}
+    
+    # Determine which variables to process
+    if variables == "*":
+        # Only process variables that are in the DataFrame
+        variables_to_process = list(df.columns)
+    elif isinstance(variables, list):
+        # Only process variables that are in both the list and the DataFrame
+        variables_to_process = [var for var in variables if var in df.columns]
+    else:
+        raise ValueError("variables must be '*' or a list of variable names")
+    
+    if not variables_to_process:
+        if verbose:
+            print("No variables to process. Make sure the specified variables exist in the DataFrame.")
+        return df
+    
+    fetcher = LabelFetcher(domain=domain, lang=lang, label_type=label_type)
+    csv_path = fetcher.ensure_labels()
+
+    # Read only the necessary columns from the CSV
+    labels_df = pd.read_csv(csv_path, delimiter=',', encoding='utf-8', on_bad_lines='skip')
+    labels_df.columns = labels_df.columns.str.strip()
+    labels_df['variable'] = labels_df['variable'].str.strip()
+    
+    # Filter to only include variables in the DataFrame
+    labels_df = labels_df[labels_df['variable'].isin(variables_to_process)]
+    
+    if labels_df.empty:
+        if verbose:
+            print(f"No matching variables found in the {domain} domain for the specified columns.")
+        return df
+
+    if label_type == 'variables':
+        required_cols = {'variable', 'variable_desc'}
+        if not required_cols.issubset(labels_df.columns):
+            raise KeyError(f"Expected columns {required_cols}, got: {labels_df.columns.tolist()}")
+
+        df.attrs['registream_labels']['variable_labels'] = labels_df.set_index('variable')['variable_desc'].to_dict()
+        
+        if verbose:
+            print(f"\n✓ Applied variable labels to {len(df.attrs['registream_labels']['variable_labels'])} variables\n")
+
+    elif label_type == 'values':
+        required_cols = {'variable', 'value_labels'}
+        if not required_cols.issubset(labels_df.columns):
+            raise KeyError(f"Expected columns {required_cols}, got: {labels_df.columns.tolist()}")
+
+        success_count = 0
+        error_count = 0
+        
+        if verbose:                
+            # Use tqdm only if verbose is True
+            for _, row in tqdm(labels_df.iterrows(), total=len(labels_df), desc="Parsing value labels"):
+                var = row['variable']
+                val_labels_str = row['value_labels']
+                try:
+                    val_dict = ast.literal_eval(val_labels_str)
+                    df.attrs['registream_labels']['value_labels'][var] = val_dict
+                    success_count += 1
+                except Exception as e:
+                    print(f"Warning parsing value_labels for '{var}': {e}")
+                    error_count += 1
+            
+            print(f"\n✓ Applied value labels to {success_count} variables ({error_count} errors)\n")
+        else:
+            # No progress bar if verbose is False
+            for _, row in labels_df.iterrows():
+                var = row['variable']
+                val_labels_str = row['value_labels']
+                try:
+                    val_dict = ast.literal_eval(val_labels_str)
+                    df.attrs['registream_labels']['value_labels'][var] = val_dict
+                except Exception:
+                    pass  # Silently skip errors when not verbose
+    
+    return df
+
+# Add the autolabel method to pandas DataFrame
+pd.DataFrame.autolabel = autolabel
+
+# Register the labeled accessor
+@pd.api.extensions.register_dataframe_accessor("lab")
+class AutoLabelAccessor:
     def __init__(self, pandas_obj):
         self._df = pandas_obj
-        self.variable_labels = {}
-        self.value_labels = {}
-
-    def autolabel(self, label_type='variables', domain='scb', lang='eng', variables="*", verbose=True):
-        fetcher = LabelFetcher(domain=domain, lang=lang, label_type=label_type)
-        csv_path = fetcher.ensure_labels()
-
-        labels_df = pd.read_csv(csv_path, delimiter=',', encoding='utf-8', on_bad_lines='skip')
-        labels_df.columns = labels_df.columns.str.strip()
-        labels_df['variable'] = labels_df['variable'].str.strip()
-
-        if label_type == 'variables':
-            required_cols = {'variable', 'variable_desc'}
-            if not required_cols.issubset(labels_df.columns):
-                raise KeyError(f"Expected columns {required_cols}, got: {labels_df.columns.tolist()}")
-
-            if variables != "*" and isinstance(variables, list):
-                labels_df = labels_df[labels_df['variable'].isin(variables)]
-
-            self.variable_labels = labels_df.set_index('variable')['variable_desc'].to_dict()
-            
-            if verbose:
-                print(f"\n✓ Applied variable labels to {len(self.variable_labels)} variables\n")
-
-        elif label_type == 'values':
-            required_cols = {'variable', 'value_labels'}
-            if not required_cols.issubset(labels_df.columns):
-                raise KeyError(f"Expected columns {required_cols}, got: {labels_df.columns.tolist()}")
-
-            if variables != "*" and isinstance(variables, list):
-                labels_df = labels_df[labels_df['variable'].isin(variables)]
-
-            success_count = 0
-            error_count = 0
-            
-            if verbose:                
-                # Use tqdm only if verbose is True
-                for _, row in tqdm(labels_df.iterrows(), total=len(labels_df), desc="Parsing value labels"):
-                    var = row['variable']
-                    val_labels_str = row['value_labels']
-                    try:
-                        val_dict = ast.literal_eval(val_labels_str)
-                        self.value_labels[var] = val_dict
-                        success_count += 1
-                    except Exception as e:
-                        print(f"Warning parsing value_labels for '{var}': {e}")
-                        error_count += 1
-                
-                print(f"\n✓ Applied value labels to {success_count} variables ({error_count} errors)\n")
-            else:
-                # No progress bar if verbose is False
-                for _, row in labels_df.iterrows():
-                    var = row['variable']
-                    val_labels_str = row['value_labels']
-                    try:
-                        val_dict = ast.literal_eval(val_labels_str)
-                        self.value_labels[var] = val_dict
-                    except Exception:
-                        pass  # Silently skip errors when not verbose
+        # Check if the DataFrame has been labeled
+        if 'registream_labels' not in self._df.attrs:
+            raise AttributeError(
+                "This DataFrame has not been labeled yet. "
+                "Please call df.autolabel() first to apply labels."
+            )
+    
+    @property
+    def variable_labels(self):
+        return self._df.attrs['registream_labels']['variable_labels']
+    
+    @property
+    def value_labels(self):
+        return self._df.attrs['registream_labels']['value_labels']
 
     def __getattr__(self, attr):
         if attr in self._df.columns:

@@ -18,6 +18,14 @@ def lookup(variables, domain='scb', lang='eng'):
     Returns:
     --------
     None, prints information to console
+    
+    Notes:
+    ------
+    The directory for label files is determined by:
+    1. The REGISTREAM_DIR environment variable if set
+    2. Default platform-specific location otherwise:
+       - Windows: C:\\Users\\<username>\\AppData\\Local\\registream\\autolabel_keys\\
+       - macOS/Linux: ~/.registream/autolabel_keys/
     """
     # If a single string is passed, convert to list
     if isinstance(variables, str):

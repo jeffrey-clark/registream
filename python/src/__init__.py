@@ -1,6 +1,14 @@
-from .autolabel import RegiStreamAccessor  # registers accessor automatically
-from .lookup import lookup  # import the lookup function
+"""
+RegiStream: Streamline your registry data workflow
+"""
 
-# Export these symbols when importing the package  (i.e. from registream import *)
-__all__ = ['lookup']
+# Import and expose the main components
+from .autolabel import autolabel
+from .lookup import lookup
+
+# Export these symbols when importing the package
+__all__ = ['lookup', 'autolabel']
+
+# Version information
+__version__ = "1.0.0"
 
