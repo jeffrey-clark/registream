@@ -1,0 +1,11 @@
+{
+    "current_version": "1.0.1",
+    "versions": [
+      {
+        "version": "1.0.1",
+        "platform": "python",
+        "release_date": "2025-03-15",
+        "notes": "Initial release + update check"
+      }
+    ]
+  } 

@@ -3,6 +3,7 @@
   "versions": [
     {
       "version": "1.0.0",
+      "platform": "stata",
       "release_date": "2024-09-27",
       "notes": "Initial release"
     }
