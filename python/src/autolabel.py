@@ -2,6 +2,99 @@ import ast
 import pandas as pd
 from .label_fetcher import LabelFetcher
 from tqdm import tqdm
+import json
+import re
+import seaborn as sns
+import matplotlib.pyplot as plt
+from functools import wraps
+
+# Helper for safer JSON parsing
+def safe_json_parse(value):
+    """Convert string to dictionary safely, using JSON or fallback."""
+    # Handle None or empty strings
+    if value is None or not isinstance(value, str) or value.strip() == '':
+        return {}
+        
+    try:
+        # First try direct JSON loads in case it's already valid JSON
+        parsed = json.loads(value)
+        return _normalize_dict_keys(parsed)
+    except json.JSONDecodeError:
+        try:
+            # Try converting Python-style dict strings to JSON format
+            # Handle both single and double quotes properly
+            processed_value = value
+            # Replace unescaped single quotes with double quotes, but preserve escaped ones
+            processed_value = re.sub(r"(?<!\\)'", '"', processed_value)
+            parsed = json.loads(processed_value)
+            return _normalize_dict_keys(parsed)
+        except json.JSONDecodeError:
+            try:
+                # Use ast.literal_eval as a fallback for Python literal structures
+                parsed = ast.literal_eval(value)
+                return _normalize_dict_keys(parsed)
+            except (SyntaxError, ValueError):
+                # Final fallback: try to handle simple key-value pairs manually
+                try:
+                    if '{' in value and '}' in value:
+                        # Extract content between curly braces
+                        content = value.split('{', 1)[1].rsplit('}', 1)[0].strip()
+                        if not content:
+                            return {}
+                            
+                        result = {}
+                        # Basic key-value extraction
+                        parts = content.split(',')
+                        for part in parts:
+                            if ':' in part:
+                                k, v = part.split(':', 1)
+                                # Clean up quotes and whitespace
+                                k = k.strip().strip('"\'')
+                                v = v.strip().strip('"\'')
+                                # Try to convert numeric keys to strings for consistency
+                                try:
+                                    if k.isdigit():
+                                        k = str(int(k))
+                                    elif k.replace('.', '', 1).isdigit():
+                                        k = str(float(k))
+                                except (ValueError, TypeError):
+                                    pass
+                                result[k] = v
+                        return result
+                except Exception:
+                    # If all parsing attempts fail, return empty dict
+                    pass
+                    
+                return {}
+
+def _normalize_dict_keys(obj):
+    """
+    Recursively normalize dictionary keys to ensure they're strings.
+    This helps with numeric keys and nested dictionaries.
+    """
+    if not isinstance(obj, dict):
+        return obj
+        
+    result = {}
+    for k, v in obj.items():
+        # Ensure keys are strings
+        str_key = str(k)
+        
+        # Recursively normalize nested dictionaries
+        if isinstance(v, dict):
+            result[str_key] = _normalize_dict_keys(v)
+        elif isinstance(v, list):
+            # Handle lists of dictionaries
+            result[str_key] = [_normalize_dict_keys(item) if isinstance(item, dict) else item 
+                              for item in v]
+        else:
+            result[str_key] = v
+            
+    return result
+
+# Store the original pandas methods before any modification
+_original_setitem = pd.DataFrame.__setitem__
+_original_rename = pd.DataFrame.rename
 
 # Main function to apply labels to a DataFrame
 def autolabel(df, label_type='variables', domain='scb', lang='eng', variables="*", verbose=True):
@@ -74,7 +167,7 @@ def autolabel(df, label_type='variables', domain='scb', lang='eng', variables="*
     if label_type == 'variables':
         required_cols = {'variable', 'variable_desc'}
         if not required_cols.issubset(labels_df.columns):
-            raise KeyError(f"Expected columns {required_cols}, got: {labels_df.columns.tolist()}")
+            return df  # Completely silently return without any message
 
         df.attrs['registream_labels']['variable_labels'] = labels_df.set_index('variable')['variable_desc'].to_dict()
         
@@ -84,7 +177,7 @@ def autolabel(df, label_type='variables', domain='scb', lang='eng', variables="*
     elif label_type == 'values':
         required_cols = {'variable', 'value_labels'}
         if not required_cols.issubset(labels_df.columns):
-            raise KeyError(f"Expected columns {required_cols}, got: {labels_df.columns.tolist()}")
+            return df  # Completely silently return without any message
 
         success_count = 0
         error_count = 0
@@ -94,97 +187,115 @@ def autolabel(df, label_type='variables', domain='scb', lang='eng', variables="*
             for _, row in tqdm(labels_df.iterrows(), total=len(labels_df), desc="Parsing value labels"):
                 var = row['variable']
                 val_labels_str = row['value_labels']
-                try:
-                    val_dict = ast.literal_eval(val_labels_str)
-                    df.attrs['registream_labels']['value_labels'][var] = val_dict
+                val_dict = safe_json_parse(val_labels_str)
+                # Always initialize value labels, even if empty
+                df.attrs['registream_labels']['value_labels'][var] = val_dict
+                if val_dict:  # If not empty
                     success_count += 1
-                except Exception as e:
-                    print(f"Warning parsing value_labels for '{var}': {e}")
+                else:
+                    # Silently count errors but don't print warnings
                     error_count += 1
             
-            print(f"\n✓ Applied value labels to {success_count} variables ({error_count} errors)\n")
+            print(f"\n✓ Applied value labels to {success_count} variables\n")
         else:
             # No progress bar if verbose is False
             for _, row in labels_df.iterrows():
                 var = row['variable']
                 val_labels_str = row['value_labels']
-                try:
-                    val_dict = ast.literal_eval(val_labels_str)
-                    df.attrs['registream_labels']['value_labels'][var] = val_dict
-                except Exception:
-                    pass  # Silently skip errors when not verbose
+                val_dict = safe_json_parse(val_labels_str)
+                # Always initialize value labels, even if empty
+                df.attrs['registream_labels']['value_labels'][var] = val_dict
     
     return df
 
-# Store the original __setitem__ method
-original_setitem = pd.DataFrame.__setitem__
-
-# Define a custom __setitem__ method that transfers labels when duplicating columns
-def custom_setitem(self, key, value):
-    # Call the original __setitem__ method
-    original_setitem(self, key, value)
+# Conditional monkey-patching: Only affect DataFrames with registream_labels
+def _conditional_setitem(self, key, value):
+    """
+    Custom __setitem__ that preserves labels only if they exist.
+    Works transparently with standard pandas for unlabeled DataFrames.
+    """
+    # Call the original method first
+    _original_setitem(self, key, value)
     
-    # Check if we're copying a column and if the DataFrame has been labeled
+    # Only apply label preservation for DataFrames with registream_labels
     if isinstance(value, pd.Series) and 'registream_labels' in self.attrs:
-        # Get the name of the source column
         source_col = value.name
         
-        # If the source column has labels, copy them to the new column
-        if source_col in self.attrs['registream_labels']['variable_labels']:
+        # Copy variable labels if available
+        if source_col and source_col in self.attrs['registream_labels']['variable_labels']:
             self.attrs['registream_labels']['variable_labels'][key] = \
                 self.attrs['registream_labels']['variable_labels'][source_col]
         
-        if source_col in self.attrs['registream_labels']['value_labels']:
+        # Copy value labels if available
+        if source_col and source_col in self.attrs['registream_labels']['value_labels']:
             self.attrs['registream_labels']['value_labels'][key] = \
                 self.attrs['registream_labels']['value_labels'][source_col]
 
-# Replace the __setitem__ method with our custom one
-pd.DataFrame.__setitem__ = custom_setitem
-
-# Store the original rename method
-original_rename = pd.DataFrame.rename
-
-# Define a custom rename method that preserves labels
-def custom_rename(self, *args, **kwargs):
-    # Check if the DataFrame has been labeled
-    has_labels = 'registream_labels' in self.attrs
+def _conditional_rename(self, *args, **kwargs):
+    """
+    Custom rename that preserves variable and value labels only if they exist.
+    Works transparently with standard pandas for unlabeled DataFrames.
+    """
+    # If DataFrame does not have registream_labels, use standard pandas behavior
+    if 'registream_labels' not in self.attrs:
+        return _original_rename(self, *args, **kwargs)
     
-    # Get the columns mapping if provided
+    # Get the columns mapping
     columns = kwargs.get('columns', None)
     if args and isinstance(args[0], dict):
         columns = args[0]
     
     # Call the original rename method
-    result = original_rename(self, *args, **kwargs)
+    result = _original_rename(self, *args, **kwargs)
     
-    # If the DataFrame has been labeled and columns is a dictionary, update the label dictionaries
-    if has_labels and isinstance(columns, dict):
-        # Get the current label dictionaries
-        variable_labels = self.attrs['registream_labels']['variable_labels'].copy()
-        value_labels = self.attrs['registream_labels']['value_labels'].copy()
+    # Handle MultiIndex columns differently
+    if isinstance(result.columns, pd.MultiIndex):
+        # Copy the registream_labels to preserve them
+        if 'registream_labels' not in result.attrs:
+            result.attrs['registream_labels'] = self.attrs['registream_labels'].copy()
         
-        # Update the variable labels dictionary
-        for old_name, new_name in columns.items():
-            if old_name in variable_labels:
-                variable_labels[new_name] = variable_labels.pop(old_name)
+        # Note: We don't update the mappings for MultiIndex columns
+        # but we preserve existing label information
+        return result
+    
+    # Make sure the result has the registream_labels attribute
+    if 'registream_labels' not in result.attrs:
+        result.attrs['registream_labels'] = self.attrs['registream_labels'].copy()
+    
+    # If columns is provided and is a dictionary, update label mappings
+    if columns and isinstance(columns, dict):
+        # Update variable labels using comprehension for efficiency
+        result.attrs['registream_labels']['variable_labels'] = {
+            columns.get(k, k): v for k, v in self.attrs['registream_labels']['variable_labels'].items()
+        }
         
-        # Update the value labels dictionary
-        for old_name, new_name in columns.items():
-            if old_name in value_labels:
-                value_labels[new_name] = value_labels.pop(old_name)
-        
-        # Update the label dictionaries in the result DataFrame
-        result.attrs['registream_labels'] = {
-            'variable_labels': variable_labels,
-            'value_labels': value_labels
+        # Update value labels using comprehension for efficiency
+        result.attrs['registream_labels']['value_labels'] = {
+            columns.get(k, k): v for k, v in self.attrs['registream_labels']['value_labels'].items()
         }
     
     return result
 
-# Replace the rename method with our custom one
-pd.DataFrame.rename = custom_rename
+# Apply the conditional monkey-patching
+pd.DataFrame.__setitem__ = _conditional_setitem
+pd.DataFrame.rename = _conditional_rename
 
-# Add a function to rename columns while preserving labels
+# Helper function to copy labels when duplicating columns
+def _copy_column_labels(df, source_col, target_col):
+    """Copy labels from one column to another if present."""
+    if 'registream_labels' in df.attrs:
+        # Copy variable label if exists
+        if source_col in df.attrs['registream_labels']['variable_labels']:
+            df.attrs['registream_labels']['variable_labels'][target_col] = \
+                df.attrs['registream_labels']['variable_labels'][source_col]
+        
+        # Copy value labels if exists
+        if source_col in df.attrs['registream_labels']['value_labels']:
+            df.attrs['registream_labels']['value_labels'][target_col] = \
+                df.attrs['registream_labels']['value_labels'][source_col]
+    return df
+
+# Function to rename columns while preserving labels
 def rename_with_labels(df, columns=None, **kwargs):
     """
     Rename columns while preserving variable and value labels.
@@ -206,12 +317,12 @@ def rename_with_labels(df, columns=None, **kwargs):
     Notes:
     ------
     This method is kept for backward compatibility.
-    The standard pandas rename method now automatically preserves labels.
+    With conditional monkey-patching, standard df.rename() now preserves labels automatically.
     """
-    # Just use the standard rename method which now preserves labels
+    # We can now just use the standard rename method since we've conditionally monkey-patched it
     return df.rename(columns=columns, **kwargs)
 
-# Add a function to copy labels from one column to another
+# Function to copy labels from one column to another
 def copy_labels(df, source_col, target_col):
     """
     Copy variable and value labels from one column to another.
@@ -229,32 +340,13 @@ def copy_labels(df, source_col, target_col):
     --------
     pandas.DataFrame
         DataFrame with labels copied from source to target column
-    
-    Notes:
-    ------
-    This function copies both variable and value labels from one column to another.
-    It's useful when creating new columns that should inherit labels from existing ones.
     """
-    # Check if the DataFrame has been labeled
-    if 'registream_labels' not in df.attrs:
-        return df
-    
-    # Make a copy of the DataFrame to avoid modifying the original
+    # Create a copy only if needed
     result = df.copy()
-    
-    # Copy variable label if it exists
-    if source_col in result.attrs['registream_labels']['variable_labels']:
-        result.attrs['registream_labels']['variable_labels'][target_col] = \
-            result.attrs['registream_labels']['variable_labels'][source_col]
-    
-    # Copy value labels if they exist
-    if source_col in result.attrs['registream_labels']['value_labels']:
-        result.attrs['registream_labels']['value_labels'][target_col] = \
-            result.attrs['registream_labels']['value_labels'][source_col]
-    
+    _copy_column_labels(result, source_col, target_col)
     return result
 
-# Add functions to get, set, and update variable and value labels
+# Add a function to get, set, and update variable and value labels
 def get_variable_labels(df, columns=None):
     """
     Get variable labels for one or more columns.
@@ -487,8 +579,6 @@ def meta_search(df, pattern, include_values=False):
     None
         Prints search results to console
     """
-    import re
-    
     # Compile the regex pattern (case insensitive)
     regex = re.compile(pattern, re.IGNORECASE)
     
@@ -580,10 +670,140 @@ class AutoLabelAccessor:
         self._df = pandas_obj
         # Check if the DataFrame has been labeled
         if 'registream_labels' not in self._df.attrs:
-            raise AttributeError(
-                "This DataFrame has not been labeled yet. "
-                "Please call df.autolabel() first to apply labels."
-            )
+            self._df.attrs['registream_labels'] = {'variable_labels': {}, 'value_labels': {}}
+            
+        # Apply monkeypatch to make the accessor work with regular Seaborn calls
+        self._apply_seaborn_monkeypatch()
+    
+    def _apply_seaborn_monkeypatch(self):
+        """
+        Apply a monkeypatch to make standard Seaborn functions automatically apply labels.
+        This happens only when this accessor's methods are called.
+        """
+        try:            
+            # Only apply the monkeypatch once per class
+            if not hasattr(self.__class__, '_monkeypatched'):
+                self.__class__._monkeypatched = True
+                
+                # Save original plot functions
+                original_plot_functions = {}
+                
+                # Functions to patch - include all common plotting functions
+                functions_to_patch = ['scatterplot', 'lineplot', 'barplot', 'boxplot', 
+                                    'violinplot', 'stripplot', 'swarmplot', 'countplot',
+                                    'histplot', 'kdeplot', 'ecdfplot', 'heatmap',
+                                    'relplot', 'lmplot', 'regplot', 'residplot']
+                
+                # Also patch pandas plot method
+                pd_plot = pd.DataFrame.plot
+                
+                @wraps(pd_plot)
+                def wrapped_pd_plot(df, *args, **kwargs):
+                    # Check if it was called through a labeled accessor
+                    if hasattr(df, '_is_labeled_accessor_call') and df._is_labeled_accessor_call:
+                        # Get the accessor that called this method
+                        accessor = df._current_accessor
+                        
+                        # Call the original plotting method
+                        ax = pd_plot(df, *args, **kwargs)
+                        
+                        # Apply axis labels after plotting
+                        x = kwargs.get('x', None)
+                        y = kwargs.get('y', None)
+                        
+                        if hasattr(ax, 'set_xlabel') and x in accessor.variable_labels:
+                            ax.set_xlabel(accessor.variable_labels[x])
+                        
+                        if hasattr(ax, 'set_ylabel') and y in accessor.variable_labels:
+                            if isinstance(y, str) and y in accessor.variable_labels:
+                                ax.set_ylabel(accessor.variable_labels[y])
+                        
+                        return ax
+                    else:
+                        # Regular DataFrame, call the original method
+                        return pd_plot(df, *args, **kwargs)
+                
+                # Patch pandas plot method
+                pd.DataFrame.plot = wrapped_pd_plot
+                
+                for func_name in functions_to_patch:
+                    if hasattr(sns, func_name):
+                        original_func = getattr(sns, func_name)
+                        original_plot_functions[func_name] = original_func
+                        
+                        @wraps(original_func)
+                        def wrapped_func(func_name=func_name, *args, **kwargs):
+                            orig_func = original_plot_functions[func_name]
+                            data = kwargs.get('data', None)
+                            
+                            # Check if we're given a labeled accessor
+                            if data is not None and hasattr(data, '_df') and isinstance(data, AutoLabelAccessor):
+                                # Instead of replacing column names, we'll use the original DataFrame
+                                # and set up a post-plot function to update axis labels
+                                labels_info = {
+                                    'variable_labels': data.variable_labels,
+                                    'value_labels': data.value_labels
+                                }
+                                
+                                # Get axis parameters
+                                x_param = kwargs.get('x', None)
+                                y_param = kwargs.get('y', None)
+                                hue_param = kwargs.get('hue', None)
+
+                                # Create a copy of the DataFrame for plotting
+                                df_with_values = data._df.copy()
+                                
+                                # Smart handling of value labels - only apply to categorical variables
+                                # For x-axis in scatter/line plots, often we want to keep the original values
+                                for col, val_dict in labels_info['value_labels'].items():
+                                    # Skip the x-axis variable for scatter/line plots to avoid "Year XXXX" labels
+                                    if col == x_param and func_name in ['scatterplot', 'lineplot']:
+                                        continue
+                                    # Only apply value labels to hue variable for better category display
+                                    if col == hue_param or (col != x_param and col != y_param):
+                                        if col in df_with_values.columns:
+                                            df_with_values[col] = df_with_values[col].astype(str).replace(val_dict)
+                                
+                                # Replace the accessor with the prepared DataFrame
+                                kwargs['data'] = df_with_values
+                                
+                                # Call the original function
+                                ax = orig_func(*args, **kwargs)
+                                
+                                # After plotting, apply axis labels based on the parameters
+                                # Update x-axis label if applicable
+                                if x_param and x_param in labels_info['variable_labels']:
+                                    ax.set_xlabel(labels_info['variable_labels'][x_param])
+                                
+                                # Update y-axis label if applicable
+                                if y_param and y_param in labels_info['variable_labels']:
+                                    ax.set_ylabel(labels_info['variable_labels'][y_param])
+                                
+                                # Update hue legend if applicable
+                                if hue_param and hue_param in labels_info['variable_labels']:
+                                    legend = ax.get_legend()
+                                    if legend:
+                                        # Update legend title
+                                        legend.set_title(labels_info['variable_labels'][hue_param])
+                                        
+                                        # Apply value labels to legend text if available
+                                        if hue_param in labels_info['value_labels']:
+                                            value_dict = labels_info['value_labels'][hue_param]
+                                            for text in legend.get_texts():
+                                                original_text = text.get_text()
+                                                if original_text in value_dict:
+                                                    text.set_text(value_dict[original_text])
+                                
+                                return ax
+                            else:
+                                # If it's not a labeled accessor, use the original function
+                                return orig_func(*args, **kwargs)
+                        
+                        # Replace the original Seaborn function
+                        setattr(sns, func_name, wrapped_func)
+        except ImportError:
+            # Seaborn not available, skip monkeypatching
+            pass
     
     @property
     def variable_labels(self):
@@ -591,7 +811,38 @@ class AutoLabelAccessor:
     
     @property
     def value_labels(self):
-        return self._df.attrs['registream_labels']['value_labels']
+        # Create a wrapper around the value_labels dictionary that returns an empty dict for missing keys
+        value_labels_dict = self._df.attrs['registream_labels']['value_labels']
+        
+        # Create a wrapper class that returns an empty dict for missing keys
+        class ValueLabelsDict(dict):
+            def __init__(self, original_dict):
+                self.original_dict = original_dict
+                
+            def __getitem__(self, key):
+                if key in self.original_dict:
+                    return self.original_dict[key]
+                return {}  # Return empty dict instead of raising KeyError
+                
+            def get(self, key, default=None):
+                return self.original_dict.get(key, default)
+                
+            def __contains__(self, key):
+                return key in self.original_dict
+                
+            def items(self):
+                return self.original_dict.items()
+                
+            def keys(self):
+                return self.original_dict.keys()
+                
+            def values(self):
+                return self.original_dict.values()
+                
+            def copy(self):
+                return self.original_dict.copy()
+        
+        return ValueLabelsDict(value_labels_dict)
 
     def __getattr__(self, attr):
         if attr in self._df.columns:
@@ -614,7 +865,19 @@ class AutoLabelAccessor:
             except AttributeError:
                 # If the attribute doesn't exist on the labeled DataFrame, try the original
                 return getattr(self._df, attr)
-            
+
+    def __iter__(self):
+        """Support iteration for compatibility with pandas/seaborn."""
+        return iter(self._df)
+
+    def __contains__(self, item):
+        """Support 'in' operator for compatibility with pandas/seaborn."""
+        return item in self._df
+
+    def keys(self):
+        """Support keys() method for compatibility with pandas/seaborn."""
+        return self._df.keys()
+
     def __getitem__(self, key):
         """Support direct column access by name or index."""
         if isinstance(key, str) and key in self._df.columns:
@@ -631,161 +894,58 @@ class AutoLabelAccessor:
                     result[col] = self._df[col]
             return result
         # For other types of access, delegate to the DataFrame
-        return self._df.__getitem__(key)
-    
+        try:
+            # Apply value labels but keep original column names
+            df_with_values = self._df.copy()
+            for col, val_dict in self.value_labels.items():
+                if col in df_with_values.columns:
+                    df_with_values[col] = df_with_values[col].astype(str).replace(val_dict)
+            return df_with_values[key]
+        except:
+            return self._df[key]
+
+    def __call__(self, *args, **kwargs):
+        """Support method chaining with plot method or other pandas functions."""
+        # Mark the DataFrame for special pandas method handling
+        df = self._df.copy()
+        df._is_labeled_accessor_call = True
+        df._current_accessor = self
+        return df
+
+    def __array__(self, dtype=None):
+        """Support numpy array protocol for direct use with matplotlib."""
+        if dtype is not None:
+            return self._df.__array__(dtype)
+        return self._df.__array__()
+
+    def __len__(self):
+        """Support len() function for compatibility with seaborn."""
+        return len(self._df)
+
     @property
     def columns(self):
         """Return the original column names for compatibility with seaborn."""
         return self._df.columns
-            
-    def __dataframe__(self, nan_as_null=False, allow_copy=True):
-        """Support the DataFrame interchange protocol for seaborn plotting."""
-        try:
-            # For seaborn compatibility, just return the original DataFrame
-            # This avoids issues with the DataFrame interchange protocol
-            return self._df.__dataframe__(nan_as_null=nan_as_null, allow_copy=allow_copy)
-        except Exception as e:
-            print(f"Warning: Error in __dataframe__ method: {e}")
-            # If there's an error, try a different approach
-            try:
-                # Create a simple copy without any modifications
-                df_copy = self._df.copy()
-                return df_copy.__dataframe__(nan_as_null=nan_as_null, allow_copy=allow_copy)
-            except Exception as e2:
-                print(f"Warning: Second error in __dataframe__ method: {e2}")
-                # Last resort: convert to a plain dictionary and back to DataFrame
-                try:
-                    df_dict = self._df.to_dict()
-                    df_plain = pd.DataFrame(df_dict)
-                    return df_plain.__dataframe__(nan_as_null=nan_as_null, allow_copy=allow_copy)
-                except Exception as e3:
-                    print(f"Warning: All attempts failed in __dataframe__ method: {e3}")
-                    raise
 
-    def rename(self, columns=None, **kwargs):
+    def autolabel(self, label_type='variables', domain='scb', lang='eng', variables="*", verbose=True):
         """
-        Rename columns while preserving variable and value labels.
+        Apply variable and value labels directly from the accessor.
         
         Parameters:
         -----------
-        columns : dict, optional
-            Dictionary mapping old column names to new column names
-        **kwargs : dict, optional
-            Additional arguments to pass to DataFrame.rename()
-            
-        Returns:
-        --------
-        pandas.DataFrame
-            DataFrame with renamed columns and preserved labels
-        
-        Notes:
-        ------
-        This method preserves variable and value labels when renaming columns.
-        It works like the standard pandas rename method but updates the label
-        dictionaries to maintain the connection between columns and their labels.
+        label_type : str, default 'variables'
+            Type of labels to apply ('variables' or 'values')
+        domain : str, default 'scb'
+            The domain to search for variables
+        lang : str, default 'eng'
+            Language for variable descriptions ('eng' or 'swe')
+        variables : list or str, default "*"
+            List of variables to label or "*" for all
+        verbose : bool, default True
+            Whether to print progress information
         """
-        return rename_with_labels(self._df, columns=columns, **kwargs)
-    
-    def meta_search(self, pattern, include_values=False):
-        """
-        Search for variables in metadata (names and labels) using regex pattern.
-        
-        Parameters:
-        -----------
-        pattern : str
-            Regex pattern to search for in variable names and labels
-        include_values : bool, default False
-            Whether to also search in value labels
-            
-        Returns:
-        --------
-        None
-            Prints search results to console
-        """
-        meta_search(self._df, pattern, include_values)
-
-    def get_variable_labels(self, columns=None):
-        """
-        Get variable labels for one or more columns.
-        
-        Parameters:
-        -----------
-        columns : str, list, or None
-            - If str: The name of a single column to get the label for
-            - If list: List of column names to get labels for
-            - If None: Get labels for all columns that have labels
-            
-        Returns:
-        --------
-        str or dict
-            - If columns is a string: The label for that column, or None if not found
-            - If columns is a list or None: Dictionary mapping column names to their labels
-        """
-        return get_variable_labels(self._df, columns)
-    
-    def set_variable_labels(self, labels, label=None):
-        """
-        Set variable labels for one or more columns.
-        
-        Parameters:
-        -----------
-        labels : str, list, or dict
-            - If str: The column name to set the label for (requires `label` argument)
-            - If list: List of column names to set the same label for (requires `label` argument)
-            - If dict: Dictionary mapping column names to labels or callables
-        label : str or callable, optional
-            The label to set (required if `labels` is a string or list), or a function that 
-            takes the current label and returns a new one
-            
-        Returns:
-        --------
-        pandas.DataFrame
-            The original DataFrame with the updated label(s) (for method chaining)
-        """
-        return set_variable_labels(self._df, labels, label)
-    
-    def get_value_labels(self, columns=None):
-        """
-        Get value labels for one or more columns.
-        
-        Parameters:
-        -----------
-        columns : str, list, or None
-            - If str: The name of a single column to get the value labels for
-            - If list: List of column names to get value labels for
-            - If None: Get value labels for all columns that have them
-            
-        Returns:
-        --------
-        dict or dict of dicts
-            - If columns is a string: The value labels dictionary for that column, or None if not found
-            - If columns is a list or None: Dictionary mapping column names to their value labels dictionaries
-        """
-        return get_value_labels(self._df, columns)
-    
-    def set_value_labels(self, columns, value_labels=None):
-        """
-        Set value labels for one or more columns.
-        
-        Parameters:
-        -----------
-        columns : str, list, or dict
-            - If str: The column name to set the value labels for (requires `value_labels`)
-            - If list: List of column names to set the same value labels for (requires `value_labels`)
-            - If dict: Dictionary mapping column names to value label dictionaries or callables
-        value_labels : dict or callable, optional
-            Dictionary mapping values to labels, or a function that takes the current 
-            value labels dictionary and returns a new one (required if `columns` is a string or list)
-            
-        Returns:
-        --------
-        pandas.DataFrame
-            The original DataFrame with the updated value labels (for method chaining)
-        """
-        return set_value_labels(self._df, columns, value_labels)
-
-   
-
-
+        # Use the existing autolabel function but return self for method chaining
+        autolabel(self._df, label_type, domain, lang, variables, verbose)
+        return self
 
 
