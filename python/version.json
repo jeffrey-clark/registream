@@ -1,11 +1,11 @@
 {
-    "current_version": "1.0.1",
+    "current_version": "1.0.0",
     "versions": [
       {
-        "version": "1.0.1",
+        "version": "1.0.0",
         "platform": "python",
-        "release_date": "2025-03-15",
-        "notes": "Initial release + update check"
+        "release_date": "2025-03-17",
+        "notes": "Initial release"
       }
     ]
   } 

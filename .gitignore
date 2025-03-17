@@ -9,3 +9,8 @@ __pycache__/
 # Exports
 exports/*
 *.dta
+
+# Config files with tokens
+python/config/*
+python/dist/*
+python/src/registream.egg-info/*
