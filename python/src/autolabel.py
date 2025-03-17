@@ -116,6 +116,74 @@ def autolabel(df, label_type='variables', domain='scb', lang='eng', variables="*
     
     return df
 
+# Store the original __setitem__ method
+original_setitem = pd.DataFrame.__setitem__
+
+# Define a custom __setitem__ method that transfers labels when duplicating columns
+def custom_setitem(self, key, value):
+    # Call the original __setitem__ method
+    original_setitem(self, key, value)
+    
+    # Check if we're copying a column and if the DataFrame has been labeled
+    if isinstance(value, pd.Series) and 'registream_labels' in self.attrs:
+        # Get the name of the source column
+        source_col = value.name
+        
+        # If the source column has labels, copy them to the new column
+        if source_col in self.attrs['registream_labels']['variable_labels']:
+            self.attrs['registream_labels']['variable_labels'][key] = \
+                self.attrs['registream_labels']['variable_labels'][source_col]
+        
+        if source_col in self.attrs['registream_labels']['value_labels']:
+            self.attrs['registream_labels']['value_labels'][key] = \
+                self.attrs['registream_labels']['value_labels'][source_col]
+
+# Replace the __setitem__ method with our custom one
+pd.DataFrame.__setitem__ = custom_setitem
+
+# Store the original rename method
+original_rename = pd.DataFrame.rename
+
+# Define a custom rename method that preserves labels
+def custom_rename(self, *args, **kwargs):
+    # Check if the DataFrame has been labeled
+    has_labels = 'registream_labels' in self.attrs
+    
+    # Get the columns mapping if provided
+    columns = kwargs.get('columns', None)
+    if args and isinstance(args[0], dict):
+        columns = args[0]
+    
+    # Call the original rename method
+    result = original_rename(self, *args, **kwargs)
+    
+    # If the DataFrame has been labeled and columns is a dictionary, update the label dictionaries
+    if has_labels and isinstance(columns, dict):
+        # Get the current label dictionaries
+        variable_labels = self.attrs['registream_labels']['variable_labels'].copy()
+        value_labels = self.attrs['registream_labels']['value_labels'].copy()
+        
+        # Update the variable labels dictionary
+        for old_name, new_name in columns.items():
+            if old_name in variable_labels:
+                variable_labels[new_name] = variable_labels.pop(old_name)
+        
+        # Update the value labels dictionary
+        for old_name, new_name in columns.items():
+            if old_name in value_labels:
+                value_labels[new_name] = value_labels.pop(old_name)
+        
+        # Update the label dictionaries in the result DataFrame
+        result.attrs['registream_labels'] = {
+            'variable_labels': variable_labels,
+            'value_labels': value_labels
+        }
+    
+    return result
+
+# Replace the rename method with our custom one
+pd.DataFrame.rename = custom_rename
+
 # Add a function to rename columns while preserving labels
 def rename_with_labels(df, columns=None, **kwargs):
     """
@@ -137,43 +205,11 @@ def rename_with_labels(df, columns=None, **kwargs):
     
     Notes:
     ------
-    This method preserves variable and value labels when renaming columns.
-    It works like the standard pandas rename method but updates the label
-    dictionaries to maintain the connection between columns and their labels.
+    This method is kept for backward compatibility.
+    The standard pandas rename method now automatically preserves labels.
     """
-    # Check if the DataFrame has been labeled
-    has_labels = 'registream_labels' in df.attrs
-    
-    # If no columns specified, just return the DataFrame
-    if columns is None:
-        return df
-    
-    # Make a copy of the DataFrame to avoid modifying the original
-    result = df.rename(columns=columns, **kwargs)
-    
-    # If the DataFrame has been labeled, update the label dictionaries
-    if has_labels:
-        # Get the current label dictionaries
-        variable_labels = df.attrs['registream_labels']['variable_labels'].copy()
-        value_labels = df.attrs['registream_labels']['value_labels'].copy()
-        
-        # Update the variable labels dictionary
-        for old_name, new_name in columns.items():
-            if old_name in variable_labels:
-                variable_labels[new_name] = variable_labels.pop(old_name)
-        
-        # Update the value labels dictionary
-        for old_name, new_name in columns.items():
-            if old_name in value_labels:
-                value_labels[new_name] = value_labels.pop(old_name)
-        
-        # Update the label dictionaries in the result DataFrame
-        result.attrs['registream_labels'] = {
-            'variable_labels': variable_labels,
-            'value_labels': value_labels
-        }
-    
-    return result
+    # Just use the standard rename method which now preserves labels
+    return df.rename(columns=columns, **kwargs)
 
 # Add a function to copy labels from one column to another
 def copy_labels(df, source_col, target_col):
@@ -257,93 +293,74 @@ def get_variable_labels(df, columns=None):
     # If columns is not a string, list, or None, raise an error
     raise TypeError("columns must be a string, list, or None")
 
-# For backward compatibility, keep get_variable_label as an alias
-def get_variable_label(df, column):
-    """
-    Get the variable label for a specific column.
-    
-    Parameters:
-    -----------
-    df : pandas.DataFrame
-        The DataFrame containing the column
-    column : str
-        The column name to get the label for
-        
-    Returns:
-    --------
-    str or None
-        The variable label, or None if not found
-    """
-    return get_variable_labels(df, column)
 
-def set_variable_label(df, column, label):
+def set_variable_labels(df, labels, label=None):
     """
-    Set the variable label for a specific column.
-    
-    Parameters:
-    -----------
-    df : pandas.DataFrame
-        The DataFrame containing the column
-    column : str
-        The column name to set the label for
-    label : str or callable
-        The label to set, or a function that takes the current label and returns a new one
-        
-    Returns:
-    --------
-    pandas.DataFrame
-        The original DataFrame with the updated label (for method chaining)
-    """
-    # Initialize the registream_labels attribute if it doesn't exist
-    if 'registream_labels' not in df.attrs:
-        df.attrs['registream_labels'] = {'variable_labels': {}, 'value_labels': {}}
-    
-    # If label is a function, apply it to the current label
-    if callable(label):
-        current_label = get_variable_label(df, column)
-        new_label = label(current_label)
-    else:
-        new_label = label
-    
-    # Set the variable label
-    df.attrs['registream_labels']['variable_labels'][column] = new_label
-    
-    return df
+    Set variable labels for one or more columns.
 
-
-def set_variable_labels(df, labels_dict):
-    """
-    Set variable labels for multiple columns at once.
-    
     Parameters:
     -----------
     df : pandas.DataFrame
         The DataFrame containing the columns
-    labels_dict : dict
-        Dictionary mapping column names to their labels
-        
+    labels : str, list, or dict
+        - If str: The column name to set the label for (requires `label` argument)
+        - If list: List of column names to set the same label for (requires `label` argument)
+        - If dict: Dictionary mapping column names to labels or callables
+    label : str or callable, optional
+        The label to set (required if `labels` is a string or list), or a function that 
+        takes the current label and returns a new one
+    
     Returns:
     --------
     pandas.DataFrame
-        The original DataFrame with the updated labels (for method chaining)
+        The original DataFrame with the updated label(s) (for method chaining)
     """
     # Initialize the registream_labels attribute if it doesn't exist
     if 'registream_labels' not in df.attrs:
         df.attrs['registream_labels'] = {'variable_labels': {}, 'value_labels': {}}
-    
-    # Set the variable labels for each column in the dictionary
-    for column, label in labels_dict.items():
-        # If label is a function, apply it to the current label
-        if callable(label):
-            current_label = get_variable_label(df, column)
-            new_label = label(current_label)
-        else:
-            new_label = label
+
+    # If `labels` is a string, treat it as a single variable assignment
+    if isinstance(labels, str):
+        if label is None:
+            raise ValueError("Must provide a `label` when setting a single variable label.")
         
-        # Set the variable label
-        df.attrs['registream_labels']['variable_labels'][column] = new_label
+        # Handle callable input for single column
+        if callable(label):
+            current_label = df.attrs['registream_labels']['variable_labels'].get(labels)
+            new_label = label(current_label)
+            df.attrs['registream_labels']['variable_labels'][labels] = new_label
+        else:
+            df.attrs['registream_labels']['variable_labels'][labels] = label
     
+    # If `labels` is a list, apply the same label to all columns in the list
+    elif isinstance(labels, list):
+        if label is None:
+            raise ValueError("Must provide a `label` when setting labels for a list of columns.")
+        
+        for col in labels:
+            # Handle callable input for each column in the list
+            if callable(label):
+                current_label = df.attrs['registream_labels']['variable_labels'].get(col)
+                new_label = label(current_label)
+                df.attrs['registream_labels']['variable_labels'][col] = new_label
+            else:
+                df.attrs['registream_labels']['variable_labels'][col] = label
+    
+    # If `labels` is a dictionary, update multiple columns
+    elif isinstance(labels, dict):
+        for col, col_label in labels.items():
+            # Handle callable input for each column in the dictionary
+            if callable(col_label):
+                current_label = df.attrs['registream_labels']['variable_labels'].get(col)
+                new_label = col_label(current_label)
+                df.attrs['registream_labels']['variable_labels'][col] = new_label
+            else:
+                df.attrs['registream_labels']['variable_labels'][col] = col_label
+    else:
+        raise TypeError("labels must be a string, list, or dictionary.")
+
     return df
+
 
 def get_value_labels(df, columns=None):
     """
@@ -383,122 +400,73 @@ def get_value_labels(df, columns=None):
     # If columns is not a string, list, or None, raise an error
     raise TypeError("columns must be a string, list, or None")
 
-# For backward compatibility, keep the original method
-def get_value_label(df, column):
-    """
-    Get the value labels for a specific column.
-    
-    Parameters:
-    -----------
-    df : pandas.DataFrame
-        The DataFrame containing the column
-    column : str
-        The column name to get the value labels for
-        
-    Returns:
-    --------
-    dict or None
-        The value labels dictionary, or None if not found
-    """
-    return get_value_labels(df, column)
 
-def set_value_labels(df, column, value_labels):
+def set_value_labels(df, columns, value_labels=None, overwrite=False):
     """
-    Set the value labels for a specific column.
-    
+    Set or update value labels for one or more columns.
+
     Parameters:
     -----------
     df : pandas.DataFrame
-        The DataFrame containing the column
-    column : str
-        The column name to set the value labels for
-    value_labels : dict or callable
-        Dictionary mapping values to labels, or a function that takes the current 
-        value labels dictionary and returns a new one
-        
+        The DataFrame containing the columns.
+    columns : str, list, or dict
+        - If str: The column name to set/update value labels for (requires `value_labels`).
+        - If list: List of column names to set/update the same value labels for (requires `value_labels`).
+        - If dict: Dictionary mapping column names to value label dictionaries.
+    value_labels : dict, optional
+        Dictionary mapping values to labels (required if `columns` is a string or list).
+    overwrite : bool, optional
+        If True, replaces existing value labels instead of merging/updating. Default is False.
+
     Returns:
     --------
     pandas.DataFrame
-        The original DataFrame with the updated value labels (for method chaining)
+        The original DataFrame with updated value labels (for method chaining).
+    
+    Raises:
+    -------
+    TypeError: If columns is not a string, list, or dictionary.
+    ValueError: If setting a single column without providing a valid dictionary.
     """
-    # Initialize the registream_labels attribute if it doesn't exist
+
+    # Ensure the labels structure exists
     if 'registream_labels' not in df.attrs:
         df.attrs['registream_labels'] = {'variable_labels': {}, 'value_labels': {}}
-    
-    # If value_labels is a function, apply it to the current value labels
-    if callable(value_labels):
-        current_value_labels = get_value_labels(df, column) or {}
-        new_value_labels = value_labels(current_value_labels)
-    else:
-        new_value_labels = value_labels
-    
-    # Set the value labels
-    df.attrs['registream_labels']['value_labels'][column] = new_value_labels
-    
-    return df
 
-
-def set_value_labels_dict(df, value_labels_dict):
-    """
-    Set value labels for multiple columns at once.
-    
-    Parameters:
-    -----------
-    df : pandas.DataFrame
-        The DataFrame containing the columns
-    value_labels_dict : dict
-        Dictionary mapping column names to their value labels dictionaries
+    # Handle setting or updating value labels
+    if isinstance(columns, str):
+        if value_labels is None:
+            raise ValueError("Must provide `value_labels` when setting for a single column.")
         
-    Returns:
-    --------
-    pandas.DataFrame
-        The original DataFrame with the updated value labels (for method chaining)
-    """
-    # Initialize the registream_labels attribute if it doesn't exist
-    if 'registream_labels' not in df.attrs:
-        df.attrs['registream_labels'] = {'variable_labels': {}, 'value_labels': {}}
-    
-    # Set the value labels for each column in the dictionary
-    for column, value_labels in value_labels_dict.items():
-        # If value_labels is a function, apply it to the current value labels
-        if callable(value_labels):
-            current_value_labels = get_value_labels(df, column) or {}
-            new_value_labels = value_labels(current_value_labels)
+        if overwrite:
+            df.attrs['registream_labels']['value_labels'][columns] = value_labels
         else:
-            new_value_labels = value_labels
+            current_labels = df.attrs['registream_labels']['value_labels'].get(columns, {})
+            df.attrs['registream_labels']['value_labels'][columns] = {**current_labels, **value_labels}
+
+    elif isinstance(columns, list):
+        if value_labels is None:
+            raise ValueError("Must provide `value_labels` when setting for a list of columns.")
         
-        # Set the value labels
-        df.attrs['registream_labels']['value_labels'][column] = new_value_labels
-    
+        for column in columns:
+            if overwrite:
+                df.attrs['registream_labels']['value_labels'][column] = value_labels
+            else:
+                current_labels = df.attrs['registream_labels']['value_labels'].get(column, {})
+                df.attrs['registream_labels']['value_labels'][column] = {**current_labels, **value_labels}
+
+    elif isinstance(columns, dict):
+        for column, labels in columns.items():
+            if overwrite:
+                df.attrs['registream_labels']['value_labels'][column] = labels
+            else:
+                current_labels = df.attrs['registream_labels']['value_labels'].get(column, {})
+                df.attrs['registream_labels']['value_labels'][column] = {**current_labels, **labels}
+
+    else:
+        raise TypeError("`columns` must be a string, list, or a dictionary when setting value labels.")
+
     return df
-
-
-
-
-# Store the original __setitem__ method
-original_setitem = pd.DataFrame.__setitem__
-
-# Define a custom __setitem__ method that transfers labels when duplicating columns
-def custom_setitem(self, key, value):
-    # Call the original __setitem__ method
-    original_setitem(self, key, value)
-    
-    # Check if we're copying a column and if the DataFrame has been labeled
-    if isinstance(value, pd.Series) and 'registream_labels' in self.attrs:
-        # Get the name of the source column
-        source_col = value.name
-        
-        # If the source column has labels, copy them to the new column
-        if source_col in self.attrs['registream_labels']['variable_labels']:
-            self.attrs['registream_labels']['variable_labels'][key] = \
-                self.attrs['registream_labels']['variable_labels'][source_col]
-        
-        if source_col in self.attrs['registream_labels']['value_labels']:
-            self.attrs['registream_labels']['value_labels'][key] = \
-                self.attrs['registream_labels']['value_labels'][source_col]
-
-# Replace the __setitem__ method with our custom one
-pd.DataFrame.__setitem__ = custom_setitem
 
 # Add a metadata search method to pandas DataFrame
 def meta_search(df, pattern, include_values=False):
@@ -633,9 +601,19 @@ class AutoLabelAccessor:
                 return series.astype(str).replace(self.value_labels[attr])
             return series
         else:
-            labeled_df = self._df.rename(columns=self.variable_labels)
-            attr_value = getattr(labeled_df, attr)
-            return attr_value
+            # Handle special attributes needed by seaborn and pandas
+            if attr in ['_is_copy', '_constructor', '_constructor_sliced', '_constructor_expanddim', 
+                       '_mgr', '_data', 'dtypes', 'ndim', 'shape', 'values', 'iloc', 'loc']:
+                return getattr(self._df, attr)
+            
+            # For other attributes, try to get them from the DataFrame with labeled columns
+            try:
+                labeled_df = self._df.rename(columns=self.variable_labels)
+                attr_value = getattr(labeled_df, attr)
+                return attr_value
+            except AttributeError:
+                # If the attribute doesn't exist on the labeled DataFrame, try the original
+                return getattr(self._df, attr)
             
     def __getitem__(self, key):
         """Support direct column access by name or index."""
@@ -662,16 +640,27 @@ class AutoLabelAccessor:
             
     def __dataframe__(self, nan_as_null=False, allow_copy=True):
         """Support the DataFrame interchange protocol for seaborn plotting."""
-        # Create a temporary DataFrame with the original column names preserved
-        df_for_plot = self._df.copy()
-        
-        # Apply value labels (no tqdm needed as it's fast)
-        for col, val_dict in self.value_labels.items():
-            if col in df_for_plot.columns:
-                df_for_plot[col] = df_for_plot[col].astype(str).replace(val_dict)
-        
-        # Return the DataFrame with original column names preserved
-        return df_for_plot.__dataframe__(nan_as_null=nan_as_null, allow_copy=allow_copy)
+        try:
+            # For seaborn compatibility, just return the original DataFrame
+            # This avoids issues with the DataFrame interchange protocol
+            return self._df.__dataframe__(nan_as_null=nan_as_null, allow_copy=allow_copy)
+        except Exception as e:
+            print(f"Warning: Error in __dataframe__ method: {e}")
+            # If there's an error, try a different approach
+            try:
+                # Create a simple copy without any modifications
+                df_copy = self._df.copy()
+                return df_copy.__dataframe__(nan_as_null=nan_as_null, allow_copy=allow_copy)
+            except Exception as e2:
+                print(f"Warning: Second error in __dataframe__ method: {e2}")
+                # Last resort: convert to a plain dictionary and back to DataFrame
+                try:
+                    df_dict = self._df.to_dict()
+                    df_plain = pd.DataFrame(df_dict)
+                    return df_plain.__dataframe__(nan_as_null=nan_as_null, allow_copy=allow_copy)
+                except Exception as e3:
+                    print(f"Warning: All attempts failed in __dataframe__ method: {e3}")
+                    raise
 
     def rename(self, columns=None, **kwargs):
         """
@@ -734,23 +723,26 @@ class AutoLabelAccessor:
         """
         return get_variable_labels(self._df, columns)
     
-    def set_variable_label(self, column, label):
+    def set_variable_labels(self, labels, label=None):
         """
-        Set the variable label for a specific column.
+        Set variable labels for one or more columns.
         
         Parameters:
         -----------
-        column : str
-            The column name to set the label for
-        label : str or callable
-            The label to set, or a function that takes the current label and returns a new one
+        labels : str, list, or dict
+            - If str: The column name to set the label for (requires `label` argument)
+            - If list: List of column names to set the same label for (requires `label` argument)
+            - If dict: Dictionary mapping column names to labels or callables
+        label : str or callable, optional
+            The label to set (required if `labels` is a string or list), or a function that 
+            takes the current label and returns a new one
             
         Returns:
         --------
         pandas.DataFrame
-            The original DataFrame with the updated label (for method chaining)
+            The original DataFrame with the updated label(s) (for method chaining)
         """
-        return set_variable_label(self._df, column, label)
+        return set_variable_labels(self._df, labels, label)
     
     def get_value_labels(self, columns=None):
         """
@@ -771,74 +763,28 @@ class AutoLabelAccessor:
         """
         return get_value_labels(self._df, columns)
     
-    def set_value_labels(self, column, value_labels):
+    def set_value_labels(self, columns, value_labels=None):
         """
-        Set the value labels for a specific column.
+        Set value labels for one or more columns.
         
         Parameters:
         -----------
-        column : str
-            The column name to set the value labels for
-        value_labels : dict or callable
+        columns : str, list, or dict
+            - If str: The column name to set the value labels for (requires `value_labels`)
+            - If list: List of column names to set the same value labels for (requires `value_labels`)
+            - If dict: Dictionary mapping column names to value label dictionaries or callables
+        value_labels : dict or callable, optional
             Dictionary mapping values to labels, or a function that takes the current 
-            value labels dictionary and returns a new one
+            value labels dictionary and returns a new one (required if `columns` is a string or list)
             
         Returns:
         --------
         pandas.DataFrame
             The original DataFrame with the updated value labels (for method chaining)
         """
-        return set_value_labels(self._df, column, value_labels)
+        return set_value_labels(self._df, columns, value_labels)
 
-    def set_variable_labels(self, labels_dict):
-        """
-        Set variable labels for multiple columns at once.
-        
-        Parameters:
-        -----------
-        labels_dict : dict
-            Dictionary mapping column names to their labels
-            
-        Returns:
-        --------
-        pandas.DataFrame
-            The original DataFrame with the updated labels (for method chaining)
-        """
-        return set_variable_labels(self._df, labels_dict)
-
-    def get_variable_label(self, column):
-        """
-        Get the variable label for a specific column.
-        
-        Parameters:
-        -----------
-        column : str
-            The column name to get the label for
-        
-        Returns:
-        --------
-        str or None
-            The variable label, or None if not found
-        """
-        return get_variable_label(self._df, column)
-
-    def get_value_label(self, column):
-        """
-        Get the value labels for a specific column.
-        
-        Parameters:
-        -----------
-        column : str
-            The column name to get the value labels for
-        
-        Returns:
-        --------
-        dict or None
-            The value labels dictionary, or None if not found
-        """
-        return get_value_label(self._df, column)
-
-
+   
 
 
 
