@@ -674,6 +674,11 @@ class AutoLabelAccessor:
             
         # Apply monkeypatch to make the accessor work with regular Seaborn calls
         self._apply_seaborn_monkeypatch()
+        
+        # Display mode controls whether to show value labels in the data cells
+        # 'variable_only': Only variable labels in headers (default)
+        # 'both': Both variable labels in headers and value labels in cells
+        self._display_mode = 'variable_only'
     
     def _apply_seaborn_monkeypatch(self):
         """
@@ -806,6 +811,75 @@ class AutoLabelAccessor:
             pass
     
     @property
+    def display_mode(self):
+        """Get the current display mode."""
+        return self._display_mode
+        
+    @display_mode.setter
+    def display_mode(self, mode):
+        """Set the display mode for labeled data.
+        
+        Parameters:
+        -----------
+        mode : str
+            'variable_only': Only show variable labels in column headers (default)
+            'both': Show variable labels in headers and value labels in cells
+        """
+        valid_modes = ['variable_only', 'both']
+        if mode not in valid_modes:
+            raise ValueError(f"Display mode must be one of {valid_modes}")
+        self._display_mode = mode
+        
+    def show_values(self):
+        """Set display mode to show both variable labels and value labels."""
+        self.display_mode = 'both'
+        return self
+        
+    def show_variables_only(self):
+        """Set display mode to show only variable labels in column headers."""
+        self.display_mode = 'variable_only'
+        return self
+    
+    def _apply_value_labels(self, df=None):
+        """Return a copy of the DataFrame with value labels applied to categorical variables."""
+        df_to_use = df if df is not None else self._df
+        df_copy = df_to_use.copy()
+        
+        # Apply value labels when in 'both' mode
+        if self._display_mode == 'both':
+            for col, val_dict in self.value_labels.items():
+                if col in df_copy.columns and val_dict:  # Only apply if value labels exist
+                    df_copy[col] = df_copy[col].astype(str).replace(val_dict)
+        
+        # Always apply variable labels to column names
+        if self.variable_labels:
+            df_copy = df_copy.rename(columns=self.variable_labels)
+            
+        return df_copy
+    
+    def __repr__(self):
+        """Return string representation with labels applied according to display mode."""
+        return self._apply_value_labels().__repr__()
+        
+    def _repr_html_(self):
+        """Return HTML representation with labels applied according to display mode."""
+        return self._apply_value_labels()._repr_html_()
+    
+    def head(self, n=5):
+        """Return first n rows with labels applied according to display mode."""
+        return self._apply_value_labels(self._df.head(n))
+        
+    def tail(self, n=5):
+        """Return last n rows with labels applied according to display mode."""
+        return self._apply_value_labels(self._df.tail(n))
+        
+    def sample(self, n=None, frac=None, replace=False, weights=None, random_state=None, axis=None):
+        """Return random sample with labels applied according to display mode."""
+        sample_df = self._df.sample(n=n, frac=frac, replace=replace, 
+                                    weights=weights, random_state=random_state, axis=axis)
+        return self._apply_value_labels(sample_df)
+    
+    @property
     def variable_labels(self):
         return self._df.attrs['registream_labels']['variable_labels']
     
@@ -895,12 +969,16 @@ class AutoLabelAccessor:
             return result
         # For other types of access, delegate to the DataFrame
         try:
-            # Apply value labels but keep original column names
-            df_with_values = self._df.copy()
-            for col, val_dict in self.value_labels.items():
-                if col in df_with_values.columns:
-                    df_with_values[col] = df_with_values[col].astype(str).replace(val_dict)
-            return df_with_values[key]
+            # Decide whether to apply value labels based on display mode
+            if self._display_mode == 'both':
+                # Apply value labels but keep original column names
+                df_with_values = self._df.copy()
+                for col, val_dict in self.value_labels.items():
+                    if col in df_with_values.columns:
+                        df_with_values[col] = df_with_values[col].astype(str).replace(val_dict)
+                return df_with_values[key]
+            else:
+                return self._df[key]
         except:
             return self._df[key]
 

@@ -1,0 +1,6 @@
+# Treat Jupyter Notebooks as documentation
+*.ipynb linguist-documentation
+
+# Treat LaTeX files as documentation
+*.tex linguist-documentation
+
