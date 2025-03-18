@@ -13,8 +13,8 @@ It provides a **consistent framework** to help researchers efficiently process, 
 
 | Version  | Stata Status | R Status  | Python Status  | Key Features |
 |----------|-------------|-----------|---------------|--------------|
-| **1.0.0** | ✅ Released | ⏳ Planned | ⏳ Planned | `autolabel` and `label` functionality |
-| **1.0.1** | ⏳ Planned  | ❌ Not yet | ❌ Not yet | Automatic check for updates |
+| **1.0.0** | ✅ Released | ⏳ Planned | ✅ Released | `autolabel` and `label` functionality |
+| **1.0.1** | ⏳ Planned  | ❌ Not yet | ⏳ Planned  | Automatic check for updates |
 
 
 - ✅ = Released  
