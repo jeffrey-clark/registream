@@ -1,0 +1,11 @@
+{
+    "current_version": "1.0.0",
+    "versions": [
+      {
+        "version": "1.0.0",
+        "platform": "R",
+        "release_date": "2025-03-18",
+        "notes": "Initial release"
+      }
+    ]
+  } 
