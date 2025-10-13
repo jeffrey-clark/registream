@@ -1,11 +1,17 @@
 {
-    "current_version": "1.0.0",
+    "current_version": "1.0.1",
     "versions": [
       {
         "version": "1.0.0",
         "platform": "python",
         "release_date": "2025-03-17",
         "notes": "Initial release"
+      },
+      {
+        "version": "1.0.1",
+        "platform": "python",
+        "release_date": "2025-10-13",
+        "notes": "Updated URLs from registream.com to registream.org"
       }
     ]
   } 

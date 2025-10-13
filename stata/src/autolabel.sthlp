@@ -207,6 +207,6 @@ Email: {browse "mailto:jie.wen@hhs.se":jie.wen@hhs.se}
 {p_end}
 
 {pstd}
-Clark, J. & Wen, J. (2024). {it:RegiStream: Streamline Your Register Data Workflow}. Version {{VERSION}}. Available from: {browse "https://registream.com"}.
+Clark, J. & Wen, J. (2024). {it:RegiStream: Streamline Your Register Data Workflow}. Version {{VERSION}}. Available from: {browse "https://registream.org"}.
 {p_end}
 

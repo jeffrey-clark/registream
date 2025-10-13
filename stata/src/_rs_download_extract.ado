@@ -30,7 +30,7 @@ program define _rs_download_extract
             }
 
             * Download the zip file
-            cap copy "https://registream.com/data/`file'.zip" "`zip'", replace
+            cap copy "https://registream.org/data/`file'.zip" "`zip'", replace
 
             * Unzip the zip file and clean up
             cap _rs_del_folder_rec "`zipfold'"

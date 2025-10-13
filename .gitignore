@@ -13,4 +13,7 @@ exports/*
 # Config files with tokens
 python/config/*
 python/dist/*
+python/build/*
 python/src/registream.egg-info/*
+paper/*
+stata_journal_submission/*

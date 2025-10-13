@@ -5,4 +5,4 @@ d with plans for expanding functionality to other domains and tasks.
 d Developed by Jeffrey Clark and Jie Wen
 d
 p registream A toolkit for managing and labeling register data, developed by Jeffrey Clark and Jie Wen
-l registream https://registream.com/stata [Visit the RegiStream website for more information]
+l registream https://registream.org/stata [Visit the RegiStream website for more information]

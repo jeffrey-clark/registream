@@ -16,7 +16,7 @@ setup(
     version=version,
     description="Streamline your registry data workflow",
     author="Jeffrey Clark & Jie Wen",
-    url="https://registream.com",
+    url="https://registream.org",
     package_dir={"": "src"},
     packages=find_packages(where="src"),
     install_requires=[

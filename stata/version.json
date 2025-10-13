@@ -1,11 +1,17 @@
 {
-  "current_version": "1.0.0",
+  "current_version": "1.0.1",
   "versions": [
     {
       "version": "1.0.0",
       "platform": "stata",
       "release_date": "2024-09-27",
       "notes": "Initial release"
+    },
+    {
+      "version": "1.0.1",
+      "platform": "stata",
+      "release_date": "2025-10-13",
+      "notes": "Updated URLs from registream.com to registream.org"
     }
   ]
 } 

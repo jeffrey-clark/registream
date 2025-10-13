@@ -505,8 +505,8 @@ program define autolabel
 		* Loop through each row in the dataset
 		forval i = 1/`=_N' {
 			* Take the value of _merge for the current row
-			local current_merge = _merge[`i']    
-			
+			local current_merge = _merge[`i']
+
 			* If the variable was found in both datasets (_merge == 3)
 			if `current_merge' == 3 {
 				di as text _dup(90)("-")
@@ -518,14 +518,23 @@ program define autolabel
 				di as text "| LABEL:        " "`=variable_desc[`i']'"
 				
 				* Format the definition and handle line breaks manually by adding indentation
-				local definition_str = "`=definition[`i']'"
-				di as text "| DEFINITION:   `=trim(substr(`"`definition_str'"', 1, 70))'"
-				
+				* Use subinstr to escape apostrophes temporarily
+				quietly {
+					gen str200 _temp_def = subinstr(definition[`i'], "'", "|APOS|", .) in `i'
+					local definition_str = _temp_def[`i']
+					drop _temp_def
+				}
+				* Restore apostrophes
+				local definition_str = subinstr("`definition_str'", "|APOS|", "'", .)
+				local def_first = trim(substr("`definition_str'", 1, 70))
+				di as text "| DEFINITION:   " "`def_first'"
+
 				* If definition length exceeds 70 characters, continue with indentation
 				if length("`definition_str'") > 70 {
 					local remaining_def = substr("`definition_str'", 71, .)
 					while length("`remaining_def'") > 0 {
-						di as text "|               " "`=trim(substr(`"`remaining_def'"', 1, 70))'"
+						local def_chunk = trim(substr("`remaining_def'", 1, 70))
+						di as text "|               " "`def_chunk'"
 						local remaining_def = substr("`remaining_def'", 71, .)
 					}
 				}

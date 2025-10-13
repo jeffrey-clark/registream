@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 # every time we build
 [project]
 name = "registream"
-version = "1.0.0"
+version = "1.0.1"
 description = "Streamline your registry data workflow"
 readme = "README.md"
 license = {text = "BSD-3-Clause"}
@@ -35,7 +35,7 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://registream.com"
+Homepage = "https://registream.org"
 Repository = "https://github.com/jeffrey-clark/registream"
 
 [tool.setuptools]

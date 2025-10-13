@@ -14,7 +14,8 @@ It provides a **consistent framework** to help researchers efficiently process, 
 | Version  | Stata Status | R Status  | Python Status  | Key Features |
 |----------|-------------|-----------|---------------|--------------|
 | **1.0.0** | ✅ Released | ⏳ Planned | ✅ Released | `autolabel` and `label` functionality |
-| **1.0.1** | ⏳ Planned  | ❌ Not yet | ⏳ Planned  | Automatic check for updates |
+| **1.0.1** | ✅ Released  | ❌ Not yet | ✅ Released  | URL migration to registream.org, CSV apostrophe fix (Stata) |
+| **1.0.2** | ⏳ Planned  | ❌ Not yet | ⏳ Planned  | Auto-update methods, data versioning system |
 
 
 - ✅ = Released  

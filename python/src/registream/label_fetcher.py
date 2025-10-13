@@ -6,7 +6,7 @@ import shutil
 import platform
 
 class LabelFetcher:
-    BASE_URL = "https://registream.com/data"
+    BASE_URL = "https://registream.org/data"
     
     # ANSI color codes
     YELLOW = "\033[93m"  # Warning/info
@@ -93,7 +93,7 @@ class LabelFetcher:
         if permission != "yes":
             print(f"\n{self.RED}{self.BOLD}Download permission denied.{self.RESET}")
             print(f"\n{self.BLUE}{self.BOLD}Please follow these manual steps:{self.RESET}")
-            print(f"{self.BLUE}1. Download {self.BOLD}{self.zip_name}{self.RESET}{self.BLUE} from {self.BOLD}https://registream.com/data/{self.RESET}")
+            print(f"{self.BLUE}1. Download {self.BOLD}{self.zip_name}{self.RESET}{self.BLUE} from {self.BOLD}https://registream.org/data/{self.RESET}")
             print(f"{self.BLUE}2. Extract the zip file to get a folder named {self.BOLD}{self.domain}_{self.label_type}_{self.lang}{self.RESET}")
             print(f"{self.BLUE}3. Place this folder in {self.BOLD}{self.label_dir}{self.RESET}")
             print(f"{self.BLUE}4. Alternatively, you can set a custom directory using the REGISTREAM_DIR environment variable{self.RESET}")
@@ -136,7 +136,7 @@ class LabelFetcher:
         except requests.exceptions.RequestException as e:
             print(f"\n{self.RED}{self.BOLD}Error downloading file: {e}{self.RESET}")
             print(f"\n{self.BLUE}{self.BOLD}Please follow these manual steps:{self.RESET}")
-            print(f"{self.BLUE}1. Download {self.BOLD}{self.zip_name}{self.RESET}{self.BLUE} from {self.BOLD}https://registream.com/data/{self.RESET}")
+            print(f"{self.BLUE}1. Download {self.BOLD}{self.zip_name}{self.RESET}{self.BLUE} from {self.BOLD}https://registream.org/data/{self.RESET}")
             print(f"{self.BLUE}2. Extract the zip file to get a folder named {self.BOLD}{self.domain}_{self.label_type}_{self.lang}{self.RESET}")
             print(f"{self.BLUE}3. Place this folder in {self.BOLD}{self.label_dir}{self.RESET}\n")
             raise
