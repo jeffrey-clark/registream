@@ -30,9 +30,7 @@ def load_version_data():
     """Load version data from version.json"""
     version_file = os.path.join(root_dir, 'stata/version.json')
     with open(version_file, 'r') as f:
-        # Remove comments from JSON before parsing
-        json_str = re.sub(r'//.*$', '', f.read(), flags=re.MULTILINE)
-        version_data = json.loads(json_str)
+        version_data = json.load(f)
     
     current_version = version_data['current_version']
     
@@ -72,7 +70,7 @@ def copy_and_update_files():
     for file_path in Path(code_dir).glob('**/*'):
         if file_path.is_file():
             # Skip dev files (they are gitignored and should not be exported)
-            if file_path.name in ['_rs_dev_config.ado', '_rs_get_dev_version.ado']:
+            if file_path.name in ['_rs_dev_config.ado', '_rs_get_dev_version.ado', '_rs_dev_utils.ado', '_rs_dev_utils.ado.template']:
                 continue
 
             # Create relative path

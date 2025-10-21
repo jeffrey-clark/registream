@@ -133,7 +133,7 @@ value_label_id, variable_name, value_labels_json, value_labels_stata, conflict, 
 **Metadata Schema:** v1.0 (current)
 **Metadata Content:** v20250114 (date-based, updates frequently)
 
-For complete schema documentation, see [docs/SCHEMA.md](docs/SCHEMA.md)  
+For complete schema documentation, see [docs/schema.md](docs/schema.md)  
 
 
 
@@ -209,21 +209,21 @@ When a new version is ready for release:
 
 ### For Users
 
-- [CHANGELOG.md](CHANGELOG.md) - Version history and release notes
-- [IMPORTANT_LIMITATIONS.md](IMPORTANT_LIMITATIONS.md) - Critical usage constraints
+- [docs/changelog.md](docs/changelog.md) - Version history and release notes
+- [docs/important_limitations.md](docs/important_limitations.md) - Critical usage constraints
 
 ### For Developers
 
 **General:**
-- [docs/CLIENT_GUIDE.md](docs/CLIENT_GUIDE.md) - Building API clients (Stata, Python, R)
-- [docs/API_DOCUMENTATION.md](docs/API_DOCUMENTATION.md) - Complete API reference
-- [docs/SCHEMA.md](docs/SCHEMA.md) - Metadata schema specification
-- [docs/METADATA_SYSTEM.md](docs/METADATA_SYSTEM.md) - Metadata architecture
+- [docs/client_guide.md](docs/client_guide.md) - Building API clients (Stata, Python, R)
+- [docs/api_documentation.md](docs/api_documentation.md) - Complete API reference
+- [docs/schema.md](docs/schema.md) - Metadata schema specification
+- [docs/metadata_system.md](docs/metadata_system.md) - Metadata architecture
 - [docs/usage_tracking.md](docs/usage_tracking.md) - Usage tracking system documentation
 
 **Stata-specific:**
-- [docs/stata/DEVELOPMENT.md](docs/stata/DEVELOPMENT.md) - Stata dev setup, version management, local testing
-- [docs/stata/STATA_ARCHITECTURE.md](docs/stata/STATA_ARCHITECTURE.md) - Stata client internal architecture
+- [docs/stata/development.md](docs/stata/development.md) - Stata dev setup, version management, local testing
+- [docs/stata/stata_architecture.md](docs/stata/stata_architecture.md) - Stata client internal architecture
 
 ### For Testers
 
