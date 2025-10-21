@@ -67,17 +67,17 @@ gen lopnr = _n + 1000
 gen kon = cond(runiform() < 0.49, 1, 2)  // Roughly 49% male, 51% female
 
 *------------------------------------------------------------------------------
-* 3. Municipality (kommun) - Swedish kommun codes
+* 3. Municipality (kommun) - Swedish kommun codes (zero-padded strings)
 *------------------------------------------------------------------------------
 * Use actual Swedish kommun codes with realistic distribution
-* Stockholm region codes: 114, 115, 120, 125, 126, 180
+* Stockholm region codes: 0114, 0115, 0120, 0125, 0126, 0180
 gen rand = runiform()
-gen kommun = 114 if rand < 0.12        // Upplands Väsby
-replace kommun = 115 if rand >= 0.12 & rand < 0.24   // Vallentuna
-replace kommun = 120 if rand >= 0.24 & rand < 0.40   // Värmdö
-replace kommun = 125 if rand >= 0.40 & rand < 0.55   // Ekerö
-replace kommun = 126 if rand >= 0.55 & rand < 0.75   // Huddinge
-replace kommun = 180 if rand >= 0.75                  // Stockholm
+gen kommun = "0114" if rand < 0.12        // Upplands Väsby
+replace kommun = "0115" if rand >= 0.12 & rand < 0.24   // Vallentuna
+replace kommun = "0120" if rand >= 0.24 & rand < 0.40   // Värmdö
+replace kommun = "0125" if rand >= 0.40 & rand < 0.55   // Ekerö
+replace kommun = "0126" if rand >= 0.55 & rand < 0.75   // Huddinge
+replace kommun = "0180" if rand >= 0.75                  // Stockholm
 drop rand
 
 *------------------------------------------------------------------------------
@@ -185,13 +185,13 @@ di as text _n "Numeric variables:"
 summarize loneink dispink04 antans stud, separator(0)
 
 di as text _n "Categorical variables (string):"
+tab kommun
 tab sun2000niva
 tab ssyk3
 tab astsni2007, sort
 
-di as text _n "Binary variables:"
+di as text _n "Binary variable (numeric):"
 tab kon
-tab kommun
 
 *------------------------------------------------------------------------------
 * Save dataset

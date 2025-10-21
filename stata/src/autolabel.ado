@@ -371,30 +371,18 @@ program define autolabel
 
 				local is_string = (substr(type[`i'], 1, 3) == "str")
 
-				* For numeric categorical: convert to string first, then encode
-				if (!`is_string') {
-					file write myfile `"cap confirm numeric variable `var_name' "' _n
-					file write myfile "if _rc == 0 {" _n
-					file write myfile `"  tostring `var_name', gen(`var_name'_strtemp) force "' _n
-					file write myfile `"  drop `var_name' "' _n
-					file write myfile `"  rename `var_name'_strtemp `var_name' "' _n
-					file write myfile "}" _n
-				}
-
-				* Now proceed with encoding (works for both originally-string and converted-to-string)
-				
 				// Determine the total number of words
-				local str_value = value_labels_stata[`i'] 
+				local str_value = value_labels_stata[`i']
 
 				// Count the number of words in the string
 				local nwords : word count `str_value'
-				
+
 				if `nwords' > 0 {
-				
+
 				* --- APPLY SUFFIX PASSED IN OPTION
 				if "`suffix'" == "" {
 					// no change
-				} 
+				}
 				else {
 					local var_name_suffix "`var_name'`suffix'"
 					file write myfile `"cap gen `var_name_suffix' = `var_name'"' _n
@@ -402,50 +390,72 @@ program define autolabel
 				}
 				* ---------------------------------
 
-				
+
 				local enc_suffix "β"
-				local enc_var_name "`var_name'`enc_suffix'"
-				// file write myfile "dis " _char(34) "`var_name'" _char(34) _n
-				file write myfile `"cap drop `enc_var_name' "' _n
-				file write myfile `"encode `var_name', gen(`enc_var_name') "' _n
 
-				file write myfile `"local labelname : value label `enc_var_name' "' _n
+				* STRING CATEGORICAL: Use encode (creates sequential codes from strings)
+				if (`is_string') {
+					local enc_var_name "`var_name'`enc_suffix'"
+					file write myfile `"cap drop `enc_var_name' "' _n
+					file write myfile `"encode `var_name', gen(`enc_var_name') "' _n
 
-				file write myfile `"levelsof `enc_var_name' , local(levels) "' _n
-					
-				forval k = 1(2)`nwords' {
-					local j = `k'+1
-					local code : word `k' of `str_value'
-					local lbl : word `j' of `str_value'
-					_rs_utils escape_ascii "`code'"
-					local clean_code "`r(escaped_string)'"
+					file write myfile `"local labelname : value label `enc_var_name' "' _n
+					file write myfile `"levelsof `enc_var_name' , local(levels) "' _n
 
-					file write myfile `"local nl_`clean_code' "`lbl'" "' _n
+					* Store the new labels in locals
+					forval k = 1(2)`nwords' {
+						local j = `k'+1
+						local code : word `k' of `str_value'
+						local lbl : word `j' of `str_value'
+						_rs_utils escape_ascii "`code'"
+						local clean_code "`r(escaped_string)'"
+
+						file write myfile `"local nl_`clean_code' "`lbl'" "' _n
+					}
+
+					* Replace labels with our metadata labels
+					file write myfile "foreach l of local levels {" _n
+					file write myfile "    local val : label " _char(96) "labelname" _char(39) " " _char(96) "l" _char(39) _n
+
+					file write myfile " _rs_utils escape_ascii " _char(96) "val" _char(39) _n
+					file write myfile " local clean_val " _char(96) "r(escaped_string)" _char(39) _n
+
+					file write myfile "    local nl_value " _char(34) _char(96) "nl_" _char(96) "clean_val" _char(39) _char(39) _char(34) _n
+					file write myfile "    if " _char(34) _char(96) "nl_value" _char(96) _char(34) " != " _char(34) _char(34) " {" _n
+					file write myfile "        label define " _char(96) "labelname" _char(39) " " _char(96) "l" _char(39) " " _char(34) _char(96) "nl_" _char(96) "val" _char(39) _char(39) _char(34) ", modify" _n
+					file write myfile "    }" _n
+					file write myfile "}" _n
+
+					file write myfile `"drop `var_name' "' _n
+					file write myfile `"rename `enc_var_name' `var_name' "' _n
 				}
-				
-				
-				file write myfile "foreach l of local levels {" _n
-				file write myfile "    local val : label " _char(96) "labelname" _char(39) " " _char(96) "l" _char(39) _n
+				* NUMERIC CATEGORICAL: Use label define + label values (preserves original codes)
+				else {
+					local label_name "`var_name'`enc_suffix'"
 
-				* perform ascii escape...
-				file write myfile " _rs_utils escape_ascii " _char(96) "val" _char(39) _n
-				file write myfile " local clean_val " _char(96) "r(escaped_string)" _char(39) _n
-				
+					* Smart handling: Filter to ONLY numeric codes if metadata has mixed types
+					* Example: kon metadata has "K" "Woman" "M" "Man" "1" "Man" "2" "Woman"
+					* For numeric variable, we only use: "1" "Man" "2" "Woman"
 
-				// Writing the dynamic `nl_value` with backticks and single quotes
-				file write myfile "    local nl_value " _char(34) _char(96) "nl_" _char(96) "clean_val" _char(39) _char(39) _char(34) _n
+					* Create label definition from value_labels_stata
+					* Format: "code1" "label1" "code2" "label2" ...
+					forval k = 1(2)`nwords' {
+						local j = `k'+1
+						local code : word `k' of `str_value'
+						local lbl : word `j' of `str_value'
 
-				// Writing the if condition
-				file write myfile "    if " _char(34) _char(96) "nl_value" _char(96) _char(34) " != " _char(34) _char(34) " {" _n
+						* Check if this code is numeric
+						cap confirm number `code'
+						if _rc == 0 {
+							* Numeric code - use it! (preserves original numeric codes)
+							file write myfile `"label define `label_name' `code' "`lbl'", modify"' _n
+						}
+						* Skip string codes silently (e.g., "K", "M" for numeric variable)
+					}
 
-				// Writing the label definition dynamically using the same format
-				// file write myfile "dis"  _char(34) _char(96) "nl_" _char(96) "val" _char(39) _char(39) _char(34) _n
-				file write myfile "        label define " _char(96) "labelname" _char(39) " " _char(96) "l" _char(39) " " _char(34) _char(96) "nl_" _char(96) "val" _char(39) _char(39) _char(34) ", modify" _n
-
-				file write myfile "    }" _n
-				file write myfile "}" _n
-				file write myfile `"drop `var_name' "' _n
-				file write myfile `"rename `enc_var_name' `var_name' "' _n
+					* Attach the label to the variable (NO recoding!)
+					file write myfile `"label values `var_name' `label_name'"' _n
+				}
 
 				}
 
@@ -460,7 +470,8 @@ program define autolabel
 
 		// Execute the tempfile as a .do file
 
-			do `tmpfile'
+		* Execute generated commands
+		quietly do `tmpfile'
 		}
 
     }
