@@ -41,6 +41,10 @@ program define _rs_utils, rclass
 		_utils_get_version `0'
 		return add
 	}
+	else if ("`subcmd'" == "get_filesize") {
+		_utils_get_filesize `0'
+		return add
+	}
 	else {
 		di as error "Invalid _rs_utils subcommand: `subcmd'"
 		exit 198
@@ -405,4 +409,52 @@ program define _utils_get_version, rclass
 		* Production: HARDCODED value (ONE location)
 		return local version "{{VERSION}}"
 	}
+end
+
+* -----------------------------------------------------------------------------
+* get_filesize: Get file size in bytes (cross-platform)
+* Returns r(size) with the file size in bytes, or 0 if file doesn't exist
+* -----------------------------------------------------------------------------
+* Uses Mata file I/O (fopen, fseek, ftell) which works on:
+*   - Windows Server / Windows PC
+*   - macOS
+*   - Linux
+*
+* Usage:
+*   _rs_utils get_filesize "/path/to/file.csv"
+*   local size = r(size)
+* -----------------------------------------------------------------------------
+cap program drop _utils_get_filesize
+program define _utils_get_filesize, rclass
+	args filepath
+
+	quietly {
+		mata: st_local("size_result", strofreal(_rs_get_filesize_mata(st_local("filepath"))))
+	}
+
+	return scalar size = `size_result'
+end
+
+* Define Mata function for file size
+mata:
+real scalar _rs_get_filesize_mata(string scalar filepath)
+{
+	real scalar fh, size, ch
+	string scalar line
+
+	fh = _fopen(filepath, "r")
+	if (fh < 0) {
+		return(0)
+	}
+
+	// Count bytes by reading file
+	size = 0
+	while ((line = fget(fh)) != J(0,0,"")) {
+		size = size + strlen(line) + 1  // +1 for newline
+	}
+
+	fclose(fh)
+
+	return(size)
+}
 end

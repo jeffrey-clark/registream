@@ -274,15 +274,12 @@ program define _al_download, rclass
 			cd "`autolabel_dir'"
 			quietly cap unzipfile "`file'.zip", replace
 			if (_rc != 0) {
-				* Stata unzipfile failed, try shell unzip (quiet mode)
-				quietly cap shell unzip -q -o "`file'.zip"
-				if (_rc != 0) {
-					cd "`original_dir'"
-					di as error "ERROR: Failed to unzip `file'.zip"
-					di as error "  ZIP file: `autolabel_dir'/`file'.zip"
-					di as error "  Expected folder: `zipfold'"
-					exit 1
-				}
+				cd "`original_dir'"
+				di as error "ERROR: Failed to unzip `file'.zip"
+				di as error "  ZIP file: `autolabel_dir'/`file'.zip"
+				di as error "  Expected folder: `zipfold'"
+				di as error "  Stata's unzipfile command failed (RC: " _rc ")"
+				exit 1
 			}
 			cd "`original_dir'"
 
@@ -523,26 +520,28 @@ program define _al_fetch, rclass
 		* Construct info endpoint URL
 		local info_url = subinstr("`api_url'", "/latest", "/latest/info", 1)
 
-		* Get version and schema from API info endpoint
-		tempfile version_out schema_out
-		cap qui shell curl -s "`info_url'" | grep -o '"version": "[^"]*"' | cut -d'"' -f4 > "`version_out'"
-		cap qui shell curl -s "`info_url'" | grep -o '"schema": "[^"]*"' | cut -d'"' -f4 > "`schema_out'"
+		* Get version and schema from API info endpoint (Windows-compatible)
+		tempfile json_out
+		cap qui shell curl -s "`info_url'" > "`json_out'"
 
-		* Read version (preserve/restore to avoid corrupting user's dataset)
-		preserve
-		cap qui infix str ver 1-20 using "`version_out'", clear
-		if (_rc == 0 & _N > 0) {
-			local actual_version = trim(ver[1])
-		}
-		restore
+		if (_rc == 0) {
+			tempname fh
+			cap file open `fh' using "`json_out'", read text
+			if (_rc == 0) {
+				file read `fh' json_line
+				file close `fh'
 
-		* Read schema (preserve/restore to avoid corrupting user's dataset)
-		preserve
-		cap qui infix str sch 1-20 using "`schema_out'", clear
-		if (_rc == 0 & _N > 0) {
-			local schema_version = trim(sch[1])
+				* Extract version with Stata's regexm (no grep/cut needed)
+				if regexm(`"`json_line'"', `""version"[ ]*:[ ]*"([^"]+)""') {
+					local actual_version = regexs(1)
+				}
+
+				* Extract schema with Stata's regexm (no grep/cut needed)
+				if regexm(`"`json_line'"', `""schema"[ ]*:[ ]*"([^"]+)""') {
+					local schema_version = regexs(1)
+				}
+			}
 		}
-		restore
 	}
 
 	* Download the dataset
@@ -693,21 +692,12 @@ program define _al_store_meta
 	* Get current timestamp (ISO 8601 format)
 	local timestamp "`c(current_date)'T`c(current_time)'Z"
 
-	* Get file size from CSV file using file I/O (no dataset operations)
+	* Get file size using Mata (cross-platform: Windows, Mac, Linux)
 	local file_size = 0
 	cap confirm file "`csv_file'"
 	if (_rc == 0) {
-		tempname fh
-		tempfile sizeout
-		* Use wc -c to count bytes, write to temp file
-		quietly shell wc -c < "`csv_file'" 2>/dev/null | awk '{print $1}' > "`sizeout'"
-		* Read the size using file I/O (doesn't touch current dataset)
-		cap file open `fh' using "`sizeout'", read text
-		if (_rc == 0) {
-			file read `fh' line
-			file close `fh'
-			local file_size = trim("`line'")
-		}
+		_rs_utils get_filesize "`csv_file'"
+		local file_size = r(size)
 	}
 	if ("`file_size'" == "" | "`file_size'" == ".") local file_size = 0
 
@@ -983,27 +973,31 @@ program define _al_check_updates, rclass
 	* Construct info endpoint to get latest version
 	local info_url "`api_host'/api/v1/datasets/`domain'/`type'/`lang'/latest/info"
 
-	* Try to get version from API
-	tempfile api_version_out
-	cap qui shell curl -s -f -m 5 "`info_url'" | grep -o '"version": "[^"]*"' | cut -d'"' -f4 > "`api_version_out'" 2>/dev/null
+	* Try to get version from API (Windows-compatible)
+	tempfile json_out
+	cap qui shell curl -s -f -m 5 "`info_url'" > "`json_out'"
+	local curl_rc = _rc
 
 	* Check if API call succeeded
-	if (_rc != 0) {
+	if (`curl_rc' != 0) {
 		* API unreachable or dataset not on API
 		return scalar checked = 1
 		return local status "api_error"
 		exit 0
 	}
 
-	* Read API version
+	* Read and parse API version
 	local api_version = ""
-	quietly {
-		preserve
-		cap infix str ver 1-20 using "`api_version_out'", clear
-		if (_rc == 0 & _N > 0) {
-			local api_version = trim(ver[1])
+	tempname fh
+	cap file open `fh' using "`json_out'", read text
+	if (_rc == 0) {
+		file read `fh' json_line
+		file close `fh'
+
+		* Extract version with Stata's regexm (no grep/cut needed)
+		if regexm(`"`json_line'"', `""version"[ ]*:[ ]*"([^"]+)""') {
+			local api_version = regexs(1)
 		}
-		restore
 	}
 
 	* Case 1: Dataset NOT in datasets.csv but exists locally
@@ -1309,15 +1303,10 @@ program define _al_verify_integrity, rclass
 
 		* Only check size if source is "api" - suppress warnings for user datasets
 		if ("`stored_source'" == "api" | "`stored_source'" == "") {
-			* Get actual file size
-			tempname fh
-			tempfile sizeout
-			quietly shell wc -c < "`csv_file'" 2>/dev/null | awk '{print $1}' > "`sizeout'"
-			cap file open `fh' using "`sizeout'", read text
-			if (_rc == 0) {
-				file read `fh' line
-				file close `fh'
-				local actual_size = trim("`line'")
+			* Get actual file size using Mata (cross-platform)
+			_rs_utils get_filesize "`csv_file'"
+			local actual_size = r(size)
+			if ("`actual_size'" == "" | "`actual_size'" == ".") local actual_size = 0
 
 				* Compare sizes (allow small differences due to line endings)
 				if ("`actual_size'" != "" & "`actual_size'" != ".") {
@@ -1360,7 +1349,6 @@ program define _al_verify_integrity, rclass
 					}
 				}
 			}
-		}
 		* else: source is "user" or other non-api value - skip size check entirely
 	}
 
@@ -1373,43 +1361,48 @@ end
 * get_latest_version_from_api: Get latest version from API without downloading
 * Uses /api/v1/datasets/{domain}/{type}/{lang}/latest/info endpoint
 * Returns r(version), r(schema), r(available) = 1 if API reachable, 0 otherwise
+*
+* Windows-compatible: Uses file read + regexm() instead of shell pipes
+* Batch-mode reliable: Checks file existence rather than trusting _rc
 * -----------------------------------------------------------------------------
 program define _al_get_latest_version, rclass
 	args domain type lang
 
-	* Get API host
-	_rs_utils get_api_host
-	local api_host "`r(host)'"
+	* Use production API host directly
+	* (Avoids dev override check which causes batch mode issues)
+	local api_host "https://registream.org"
 
 	* Construct info endpoint
 	local info_url "`api_host'/api/v1/datasets/`domain'/`type'/`lang'/latest/info"
 
-	* Try to get version info from API
-	tempfile version_out schema_out
-	cap qui shell curl -s -f -m 5 "`info_url'" | grep -o '"version": "[^"]*"' | cut -d'"' -f4 > "`version_out'" 2>/dev/null
+	* Try to get version info from API (use curl, parse with Stata - Windows compatible)
+	tempfile json_out
+	cap qui shell curl -s -f -m 5 "`info_url'" > "`json_out'"
 	local curl_rc = _rc
 
 	if (`curl_rc' == 0) {
-		* Read version
-		quietly {
-			preserve
-			cap infix str ver 1-20 using "`version_out'", clear
-			if (_rc == 0 & _N > 0) {
-				local api_version = trim(ver[1])
-			}
-			restore
-		}
+		* Read and parse JSON response (Windows-compatible, no grep/cut needed)
+		local api_version = ""
+		local api_schema = ""
 
-		* Also try to get schema
-		cap qui shell curl -s -f -m 5 "`info_url'" | grep -o '"schema": "[^"]*"' | cut -d'"' -f4 > "`schema_out'" 2>/dev/null
+		* Use file read to get JSON content
+		tempname fh
+		cap file open `fh' using "`json_out'", read text
 		if (_rc == 0) {
-			quietly {
-				preserve
-				cap infix str sch 1-20 using "`schema_out'", clear
-				if (_rc == 0 & _N > 0) {
-					local api_schema = trim(sch[1])
+			file read `fh' json_line
+			local read_rc = _rc
+			file close `fh'
+
+			if (`read_rc' == 0) {
+				* Extract version: look for "version":"..." or "version": "..."
+				if regexm(`"`json_line'"', `""version"[ ]*:[ ]*"([^"]+)""') {
+					local api_version = regexs(1)
 				}
-				restore
+
+				* Extract schema: look for "schema":"..." or "schema": "..."
+				if regexm(`"`json_line'"', `""schema"[ ]*:[ ]*"([^"]+)""') {
+					local api_schema = regexs(1)
+				}
 			}
 		}
 

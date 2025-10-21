@@ -822,19 +822,15 @@ program define _upd_rebuild_yaml, rclass
 		local lang = "`r(dataset_`i'_lang)'"
 		local schema = "`r(dataset_`i'_schema)'"
 
-		* Get file size from CSV file (the actual downloaded dataset)
+		* Get file size using Mata (cross-platform: Windows, Mac, Linux)
 		local csv_file "`registream_dir'/autolabel_keys/`key'.csv"
 		local file_size = 0
-		quietly {
-			preserve
-			tempfile sz_out
-			cap shell ls -l "`csv_file'" | awk '{print $5}' > "`sz_out'"
-			cap infix str sz 1-20 using "`sz_out'", clear
-			if (_rc == 0 & _N > 0) {
-				local file_size = sz[1]
-			}
-			restore
+		cap confirm file "`csv_file'"
+		if (_rc == 0) {
+			_rs_utils get_filesize "`csv_file'"
+			local file_size = r(size)
 		}
+		if ("`file_size'" == "" | "`file_size'" == ".") local file_size = 0
 
 		* Write CSV row (with explicit domain, type, lang columns)
 		* Using semicolon delimiter
