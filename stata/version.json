@@ -1,17 +1,71 @@
 {
-  "current_version": "1.0.1",
+  "current_version": "2.0.0",
   "versions": [
     {
-      "version": "1.0.0",
+      "version": "2.0.0",
       "platform": "stata",
-      "release_date": "2024-09-27",
-      "notes": "Initial release"
+      "release_date": "2025-10-21",
+      "type": "major",
+      "notes": "Major infrastructure upgrade with API v1, Schema 1.0, and comprehensive tooling",
+      "highlights": [
+        "New registream command with subcommands (info, config, update, stats, version, cite)",
+        "API v1 migration with RESTful endpoints (/api/v1/datasets/{domain}/{type}/{lang}/{version})",
+        "Schema 1.0 support with improved column names and validation",
+        "Three-mode configuration system (Offline/Standard/Full) with first-run setup",
+        "Usage tracking with local logging and optional anonymous telemetry",
+        "Automatic update check with 24-hour caching and persistent notifications",
+        "File integrity verification and metadata tracking (datasets.csv)",
+        "Intelligent user prompts with version choice options",
+        "Development mode infrastructure with clean function-based overrides",
+        "Comprehensive test suite with 14 test files (100% pass rate)",
+        "Complete documentation overhaul (14 new documentation files)",
+        "6 new Stata utility modules for modular architecture"
+      ],
+      "breaking_changes": [
+        "Schema 0.5 datasets incompatible - re-download required for Schema 1.0 (column renamed: variable → variable_name)",
+        "API v1 endpoints now default (legacy routes still supported for backward compatibility)"
+      ],
+      "bug_fixes": [
+        "Fixed escape_ascii return local syntax",
+        "Error messages no longer suppressed during execution",
+        "registream stats no longer logs itself (prevents recursion)",
+        "autolabel info now shows usage_logging setting correctly"
+      ],
+      "github_release": "https://github.com/jeffrey-clark/registream/releases/tag/v2.0.0-stata"
     },
     {
       "version": "1.0.1",
       "platform": "stata",
-      "release_date": "2025-10-13",
-      "notes": "Updated URLs from registream.com to registream.org"
+      "release_date": "2025-01-14",
+      "type": "patch",
+      "notes": "URL migration and CSV apostrophe parsing fix",
+      "highlights": [
+        "Migrated API host from registream.com to registream.org",
+        "Fixed CSV apostrophe parsing error in autolabel command",
+        "Re-exported SCB datasets with improved handling of special characters"
+      ],
+      "breaking_changes": [],
+      "bug_fixes": [
+        "Fixed apostrophe handling in CSV data when displaying variable definitions"
+      ],
+      "github_release": "https://github.com/jeffrey-clark/registream/releases/tag/v1.0.1-stata"
+    },
+    {
+      "version": "1.0.0",
+      "platform": "stata",
+      "release_date": "2024-09-28",
+      "type": "major",
+      "notes": "Initial public release of RegiStream for Stata",
+      "highlights": [
+        "Automatic variable and value labeling from SCB metadata",
+        "Support for English and Swedish languages",
+        "Schema v0.5 with basic metadata structure",
+        "Legacy API routes (/data/{file}.zip)",
+        "autolabel command for variables and values"
+      ],
+      "breaking_changes": [],
+      "bug_fixes": [],
+      "github_release": "https://github.com/jeffrey-clark/registream/releases/tag/v1.0.0-stata"
     }
   ]
-} 
+}

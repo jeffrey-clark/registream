@@ -15,5 +15,17 @@ python/config/*
 python/dist/*
 python/build/*
 python/src/registream.egg-info/*
-paper/*
+
 stata_journal_submission/*
+paper/*
+stata_journal_submission_notes/*
+
+# Development configuration (never commit)
+# These files can contain API host overrides and batch mode settings
+stata/src/_rs_dev_utils.ado
+_rs_dev_utils.ado
+# Test outputs (git-ignored, but keep test scripts)
+stata/tests/data/*.dta
+stata/tests/logs/*.log
+stata/tests/logs/*.smcl
+

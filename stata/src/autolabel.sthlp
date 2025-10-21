@@ -2,10 +2,12 @@
 {* *! version {{VERSION}} {{STHLP_DATE}}}{...}
 
 {vieweralsosee "" "--"}{...}
+{vieweralsosee "registream" "help registream"}{...}
 {viewerjumpto "Syntax" "autolabel##syntax"}{...}
 {viewerjumpto "Description" "autolabel##description"}{...}
-{viewerjumpto "Examples" "autolabel##examples"}{...}
 {viewerjumpto "Options" "autolabel##options"}{...}
+{viewerjumpto "Examples" "autolabel##examples"}{...}
+{viewerjumpto "See also" "autolabel##seealso"}{...}
 {viewerjumpto "Authors" "autolabel##authors"}{...}
 {title:Title}
 
@@ -46,46 +48,23 @@ Look up any variables in a domain:
 {p_end}
 
 {pstd}
+{bf:First-run setup:} When you first use {cmd:autolabel}, RegiStream will ask you to choose a setup mode (Offline, Standard, or Full Mode). This determines whether metadata is downloaded automatically and whether usage data is collected. You can change these settings later using {cmd:registream config}. See {help registream:registream} for details.
+{p_end}
+
+{pstd}
 The three main functions are:
 {p_end}
 
 {phang2}
-- {cmd:variables}: Automatically apply labels to variables from the specified domain.
+{cmd:variables} - Apply labels to variables from the specified domain
 {p_end}
 
 {phang2}
-- {cmd:values}: Automatically apply value labels to variables from the specified domain.
+{cmd:values} - Apply value labels to variables from the specified domain
 {p_end}
 
 {phang2}
-- {cmd:lookup}: Look up and display labels for the specified variables from a domain.
-{p_end}
-
-{marker data}{...}
-{title:Data}
-
-{pstd}
-{cmd:autolabel} downloads and stores compressed register data codebook files that can be accessed by multiple platforms, including Stata, R, and Python. This flexibility allows users to handle the same datasets across different environments, streamlining workflows for interdisciplinary teams or projects requiring multiple languages.
-{p_end}
-
-{pstd}
-By default, {cmd:autolabel} stores downloaded data files in the following directories:
-{p_end}
-
-{phang2}
-- For macOS: `/Users/{it:username}/.registream/`
-{p_end}
-
-{phang2}
-- For Windows: `C:/Users/{it:username}/AppData/Local/registream/`
-{p_end}
-
-{pstd}
-In secure or offline environments where a standard user directory does not exist (e.g., MONA or other high-security systems), users can specify a custom directory using the global {cmd:$registream_dir}. This setup ensures flexibility for secure systems where paths like `C:/Users` may not be available.
-{p_end}
-
-{pstd}
-The data structure and labels used by {cmd:autolabel} are designed to be portable and compatible across multiple statistical and programming environments, making it easy to use the same data in R, Python, Stata, or other platforms.
+{cmd:lookup} - Look up and display labels for specified variables
 {p_end}
 
 {marker options}{...}
@@ -122,7 +101,7 @@ Specify a suffix to append to the new variable names.
 {phang2}{cmd:. autolabel variables, domain(scb) lang(eng) }{p_end}
 
 {pstd}
-This command labels all varaibles, using the SCB domain in English.
+This command labels all variables, using the SCB domain in English.
 {p_end}
 
 
@@ -186,6 +165,20 @@ This displays the labels, definitions, and value labels (if applicable) for the 
 {p_end}
 
 
+{marker seealso}{...}
+{title:See also}
+
+{pstd}
+{help registream:registream} - RegiStream package management and configuration
+{p_end}
+
+{pmore2}
+• View configuration: {cmd:registream info}{break}
+• Change settings: {cmd:registream config, option(value)}{break}
+• Check updates: {cmd:registream update}{break}
+• View usage stats: {cmd:registream stats}
+{p_end}
+
 {marker contact}{...}
 {title:Authors}
 
@@ -207,6 +200,6 @@ Email: {browse "mailto:jie.wen@hhs.se":jie.wen@hhs.se}
 {p_end}
 
 {pstd}
-Clark, J. & Wen, J. (2024). {it:RegiStream: Streamline Your Register Data Workflow}. Version {{VERSION}}. Available from: {browse "https://registream.org"}.
+Clark, J. & Wen, J. (2024–). {it:RegiStream: Streamline Your Register Data Workflow} (Version {{VERSION}}). Available at: {browse "https://registream.org"}.
 {p_end}
 

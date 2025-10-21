@@ -71,6 +71,10 @@ def copy_and_update_files():
     code_dir = os.path.join(root_dir, 'stata/src')
     for file_path in Path(code_dir).glob('**/*'):
         if file_path.is_file():
+            # Skip dev files (they are gitignored and should not be exported)
+            if file_path.name in ['_rs_dev_config.ado', '_rs_get_dev_version.ado']:
+                continue
+
             # Create relative path
             rel_path = file_path.relative_to(code_dir)
             dest_path = os.path.join(temp_dir, rel_path)
