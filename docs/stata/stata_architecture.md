@@ -234,6 +234,8 @@ else {
 
 **File Integrity Checks:** Detects missing files, missing metadata, and size mismatches (>5% difference triggers corruption warning).
 
+**Status Code Coordination:** `verify_file_integrity` returns explicit status codes (`should_download`, `user_approved`, `download_version`) that upper-layer functions use to coordinate behavior. This prevents duplicate prompts - if `verify_integrity` prompts the user and they approve, it sets `user_approved=1` so the download logic doesn't prompt again.
+
 ---
 
 ### 6. Validation System (`_rs_validate_schema.ado`)
@@ -517,6 +519,7 @@ See [stata/tests/README.md](../../stata/tests/README.md) for test documentation.
 3. **Respect config settings** - Always check config before optional behavior (internet access, usage tracking)
 4. **Return values consistently** - Use `rclass` and return values
 5. **Handle errors gracefully** - Use `cap` for network operations, provide user-friendly error messages
+6. **Coordinate via explicit status codes** - When functions need to coordinate (e.g., one prompts user, another acts on response), use explicit return values (`r(user_approved)`) rather than inferring state from other values
 
 ---
 

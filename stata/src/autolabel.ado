@@ -202,19 +202,19 @@ program define autolabel
 	foreach d in "`registream_dir'" "`autolabel_dir'" {
 
 		_rs_utils confirmdir "`d'"
-		
+
 		if (r(exists) == 0) {
-			
+
 			if (`alerted' == 0) {
-				dis as result "Creating system folders..."
+				di as text ""
+				di as text "Creating system folders..."
 				local alerted 1
 			}
-			
-			dis as text "Creating dir: `d'"
-			mkdir "`d'"
-		}	
-		
-		
+
+			quietly mkdir "`d'"
+		}
+
+
 	}
 		
 		
@@ -239,7 +239,8 @@ program define autolabel
 
     if "`label_type'" == "variables" {
 
-        di as text "Labeling variables in domain `domain' using language `lang'"
+        di as text ""
+        di as text "Applying variable labels..."
 
 		quietly {
 
@@ -303,6 +304,12 @@ program define autolabel
 			do `tmpfile'
 		}
 
+		di as text ""
+		di as result "✓ Variable labels applied successfully"
+		di as text "  Domain: {result:`domain'}"
+		di as text "  Language: {result:`lang'}"
+		di as text ""
+
     }
 
 	* ----- AUTOLABEL VALUE LABELS ---------
@@ -328,7 +335,8 @@ program define autolabel
 		
 
 
-        di as text "Labeling values in domain `domain' using language `lang'"
+        di as text ""
+        di as text "Applying value labels..."
 
 		quietly {
 
@@ -474,6 +482,12 @@ program define autolabel
 		quietly do `tmpfile'
 		}
 
+		di as text ""
+		di as result "✓ Value labels applied successfully"
+		di as text "  Domain: {result:`domain'}"
+		di as text "  Language: {result:`lang'}"
+		di as text ""
+
     }
 
 	else if "`label_type'" == "lookup" {
@@ -506,9 +520,12 @@ program define autolabel
 		csv("`val_filepath_csv'") dta("`val_filepath_dta'") file("`val_filename'") ///
 		registream_dir("`registream_dir'") autolabel_dir("`autolabel_dir'") clean("values")
 			
-		
-		di as text "Looking up variables in domain `domain' using language `lang'"
-		
+
+
+		di as text ""
+		di as text "Looking up variable definitions..."
+		di as text ""
+
 		quietly {
 				
 		* --- Create a dataset with the passed variables

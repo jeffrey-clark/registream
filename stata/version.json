@@ -22,8 +22,8 @@
         "6 new Stata utility modules for modular architecture"
       ],
       "breaking_changes": [
-        "Schema 0.5 datasets incompatible - re-download required for Schema 1.0 (column renamed: variable → variable_name)",
-        "API v1 endpoints now default (legacy routes still supported for backward compatibility)"
+        "v2.0.0 requires Schema 1.0 datasets - users must re-download all datasets (column renamed: variable → variable_name)",
+        "v1.0.1 users can continue using v1.0.1 with Schema 0.5 datasets and legacy API routes"
       ],
       "bug_fixes": [
         "Fixed escape_ascii return local syntax",

@@ -104,6 +104,7 @@ program define _al_download, rclass
 	* This will prompt user if issues are detected
 	_rs_autolabel_utils verify_file_integrity "`autolabel_dir'" "`check_domain'" "`check_type'" "`check_lang'" "`csv'" "`dta'"
 	local should_download = r(should_download)
+	local user_already_approved = r(user_approved)
 	local integrity_version "`r(download_version)'"
 
 	* If integrity check returned a specific version, use it
@@ -195,13 +196,15 @@ program define _al_download, rclass
 				exit 1
 			}
 
-			* Prompt user for download permission
-			di as text ""
-			di as text "Dataset file does not exist: {result:`file'.csv}"
-			di as text ""
+			* Prompt user for download permission (unless already approved in verify_integrity)
+			if (`user_already_approved' == 0) {
+				di as text ""
+				di as text "Dataset file does not exist: {result:`file'.csv}"
+				di as text ""
 
-			_rs_utils prompt "Download dataset from RegiStream API?"
-			* If we reach here, user approved (prompt exits on "no")
+				_rs_utils prompt "Download dataset from RegiStream API?"
+				* If we reach here, user approved (prompt exits on "no")
+			}
 
 			* Get API host (production or dev override)
 			_rs_utils get_api_host
@@ -271,17 +274,17 @@ program define _al_download, rclass
 
 			* Unzip the zip file (quietly)
 			local original_dir `"`c(pwd)'"'
-			cd "`autolabel_dir'"
+			quietly cd "`autolabel_dir'"
 			quietly cap unzipfile "`file'.zip", replace
 			if (_rc != 0) {
-				cd "`original_dir'"
+				quietly cd "`original_dir'"
 				di as error "ERROR: Failed to unzip `file'.zip"
 				di as error "  ZIP file: `autolabel_dir'/`file'.zip"
 				di as error "  Expected folder: `zipfold'"
 				di as error "  Stata's unzipfile command failed (RC: " _rc ")"
 				exit 1
 			}
-			cd "`original_dir'"
+			quietly cd "`original_dir'"
 
 			* Verify the folder was created
 			_rs_utils confirmdir "`zipfold'"
@@ -1116,6 +1119,7 @@ end
 * Returns r(status) = "ok", "missing_file", "missing_metadata", "size_mismatch"
 * Returns r(should_download) = 1 if should download, 0 if ok to proceed
 * Returns r(download_version) = specific version to download (if user chose one)
+* Returns r(user_approved) = 1 if user was prompted and approved download, 0 otherwise
 * -----------------------------------------------------------------------------
 program define _al_verify_integrity, rclass
 	args autolabel_dir domain type lang csv_file dta_file
@@ -1124,6 +1128,7 @@ program define _al_verify_integrity, rclass
 	return clear
 	return local status "ok"
 	return scalar should_download = 0
+	return scalar user_approved = 0
 
 	* Create dataset key
 	local file_type = cond("`type'" == "values", "value_labels", "`type'")
@@ -1232,13 +1237,15 @@ program define _al_verify_integrity, rclass
 			di as text ""
 			return local status "missing_file"
 			return scalar should_download = 1
+			return scalar user_approved = 1
 			return local download_version "`download_version'"
 			exit 0
 		}
 		else {
-			* No metadata either - normal download flow
+			* No metadata either - normal download flow (no prompt needed)
 			return local status "missing_file"
 			return scalar should_download = 1
+			return scalar user_approved = 0
 			exit 0
 		}
 	}
@@ -1265,35 +1272,38 @@ program define _al_verify_integrity, rclass
 		di as text ""
 		di as text "Files exist locally but have no entry in datasets.csv."
 		di as text "This could indicate:"
-		di as text "  • User-created custom metadata"
-		di as text "  • Downloaded with RegiStream v1.0.1 or earlier"
+		di as text "  • Downloaded with RegiStream v1.0.1 or earlier (simple upgrade needed)"
+		di as text "  • User-created custom metadata (requires manual configuration)"
 		di as text "  • Manually copied from another location"
 		di as text ""
 
 		if (`api_available' == 1) {
 			di as text "Latest API version: {result:`api_version'}"
 			di as text ""
-			di as text "Options:"
-			di as text "  1. Continue using existing files (unknown version)"
-			di as text "  2. Re-download v{result:`api_version'} from API to enable version tracking"
+			di as text "To enable version tracking and integrity checks, re-download from API."
+			di as text ""
+			di as text "If this is custom metadata, configure datasets.csv with source='user'"
+			di as text "before running this command. See: https://registream.org/docs/custom-datasets"
 		}
 		else {
 			di as text "Latest API version: {error:unavailable (offline or no connection)}"
 			di as text ""
-			di as text "Options:"
-			di as text "  1. Continue using existing files (unknown version)"
-			di as text "  2. Re-download from API when online to enable version tracking"
+			di as text "To enable version tracking and integrity checks, re-download from API when online."
+			di as text ""
+			di as text "If this is custom metadata, configure datasets.csv with source='user'"
+			di as text "before running this command. See: https://registream.org/docs/custom-datasets"
 		}
 
 		di as text ""
 
-		_rs_autolabel_utils prompt_user "Re-download dataset to enable version tracking?"
+		_rs_autolabel_utils prompt_user "Re-download dataset from API to enable version tracking?"
 		* User approved (exits on "no")
 
 		di as text "{hline 60}"
 		di as text ""
 		return local status "missing_metadata"
 		return scalar should_download = 1
+		return scalar user_approved = 1
 		exit 0
 	}
 
@@ -1329,9 +1339,8 @@ program define _al_verify_integrity, rclass
 						di as text "  • Manual modification"
 						di as text "  • Incomplete download"
 						di as text ""
-						di as text "Options:"
-						di as text "  1. Continue using current file (may have issues)"
-						di as text "  2. Re-download to ensure integrity"
+						di as text "Re-download to ensure file integrity."
+						di as text "(Saying 'no' will abort the command)"
 						di as text ""
 						di as text "Tip: To suppress this warning for custom datasets,"
 						di as text "     set source='user' in datasets.csv"
@@ -1345,6 +1354,7 @@ program define _al_verify_integrity, rclass
 						di as text ""
 						return local status "size_mismatch"
 						return scalar should_download = 1
+						return scalar user_approved = 1
 						exit 0
 					}
 				}
