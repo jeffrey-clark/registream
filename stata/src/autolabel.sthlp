@@ -7,6 +7,7 @@
 {viewerjumpto "Description" "autolabel##description"}{...}
 {viewerjumpto "Options" "autolabel##options"}{...}
 {viewerjumpto "Examples" "autolabel##examples"}{...}
+{viewerjumpto "Important Limitations" "autolabel##limitations"}{...}
 {viewerjumpto "See also" "autolabel##seealso"}{...}
 {viewerjumpto "Authors" "autolabel##authors"}{...}
 {title:Title}
@@ -86,8 +87,8 @@ Specify a list of variables to exclude from labeling.
 {p_end}
 
 {phang}
-{opt suffix(string)}  
-Specify a suffix to append to the new variable names. 
+{opt suffix(string)}
+Specify a suffix to append to the new variable names. When using {cmd:autolabel values} on string categorical variables, the original string codes are permanently replaced with sequential numeric codes. Use {opt suffix()} to preserve the original variable and create a new labeled version instead. See {bf:Important Limitations} below.
 {p_end}
 
 {marker examples}{...}
@@ -162,6 +163,38 @@ This command applies value labels to the kon variable, using the SCB domain in E
 
 {pstd}
 This displays the labels, definitions, and value labels (if applicable) for the variables {cmd:carb}, {cmd:yrkarbtyp}, and {cmd:kaross} from the SCB domain in English. The variable {cmd:random_var} does not exist in the domain, so a warning is returned at the end.
+{p_end}
+
+
+{marker limitations}{...}
+{title:Important Limitations}
+
+{pstd}
+{bf:⚠️ String Categorical Variables Lose Original Data}
+{p_end}
+
+{pstd}
+When using {cmd:autolabel values} on {bf:string categorical variables}, the original string codes are permanently replaced with sequential numeric codes (1, 2, 3...). This means:
+{p_end}
+
+{phang2}
+• Original string codes cannot be recovered after encoding{break}
+• You cannot filter by original string values after labeling{break}
+• Re-running {cmd:autolabel values} requires reloading original data
+{p_end}
+
+{pstd}
+{bf:Numeric categorical variables} do not have this limitation - they preserve original numeric codes when labels are applied.
+{p_end}
+
+{pstd}
+{ul:Solution}: Use the {opt suffix()} option to preserve original data:
+{p_end}
+
+{phang2}{cmd:. autolabel values astsni2007, domain(scb) lang(eng) suffix("_lbl")}{p_end}
+
+{pstd}
+This keeps the original {cmd:astsni2007} variable unchanged and creates a new labeled variable {cmd:astsni2007_lbl}.
 {p_end}
 
 

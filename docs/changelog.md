@@ -235,8 +235,8 @@ scb,variables,eng,20251014,1.0,api,124567,20251020
 ### User Documentation
 1. **changelog.md** (this file) - Complete version history
 2. **important_limitations.md** - Critical usage constraints
-   - Cannot run `autolabel values` twice (major limitation)
-   - Technical explanation and workarounds
+   - String categorical variables lose original data after encoding
+   - Technical explanation and suffix() option workaround
 
 ### Developer Documentation
 3. **docs/stata/development.md** - Stata development setup, version management, and local API testing
