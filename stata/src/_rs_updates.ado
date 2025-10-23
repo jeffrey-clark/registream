@@ -8,6 +8,7 @@ cap program drop _rs_updates
 cap program drop _upd_check_package
 cap program drop _upd_check_background
 cap program drop _upd_show_notification
+cap program drop _upd_send_heartbeat
 cap program drop _upd_check_datasets
 cap program drop _upd_update_datasets_interactive
 cap program drop _upd_scan_datasets
@@ -28,6 +29,10 @@ program define _rs_updates, rclass
 	}
 	else if ("`subcmd'" == "show_notification") {
 		_upd_show_notification `0'
+		return add
+	}
+	else if ("`subcmd'" == "send_heartbeat") {
+		_upd_send_heartbeat `0'
 		return add
 	}
 	else if ("`subcmd'" == "check_datasets") {
@@ -92,9 +97,9 @@ program define _upd_check_package, rclass
 	* Construct version check endpoint
 	local version_url "`api_host'/api/v1/stata/version"
 
-	* Fetch latest version from API
+	* Fetch latest version from API using native Stata copy (no shell commands)
 	tempfile version_json
-	cap qui shell curl -s -m 5 "`version_url'" > "`version_json'"
+	cap copy "`version_url'" "`version_json'", replace
 	if (_rc != 0) {
 		* Network error or timeout
 		return scalar update_available = 0
@@ -201,9 +206,12 @@ program define _upd_check_background
 		exit 0
 	}
 
-	* Check last_update_check timestamp
+	* Check last_update_check timestamp (stored as numeric clock value)
 	_rs_config get "`registream_dir'" "last_update_check"
 	local last_check "`r(value)'"
+
+	* Get current time as Stata clock (ms since 1960-01-01)
+	local current_clock = clock("`c(current_date)' `c(current_time)'", "DMY hms")
 
 	* If last_check is empty or > 24 hours ago, check for updates
 	local should_check = 0
@@ -213,26 +221,11 @@ program define _upd_check_background
 		local should_check = 1
 	}
 	else {
-		* Parse timestamp and check if > 24 hours old
-		* Format: "20 Oct 2025T13:45:30Z" or similar
-		* Simple heuristic: extract date and time, compare with current
+		* Calculate time difference in milliseconds
+		local time_diff_ms = `current_clock' - `last_check'
 
-		* Get current date/time
-		local current_date "`c(current_date)'"
-		local current_time "`c(current_time)'"
-
-		* Extract date from last_check (before 'T')
-		if (strpos("`last_check'", "T") > 0) {
-			local check_date = substr("`last_check'", 1, strpos("`last_check'", "T") - 1)
-
-			* Simple check: if dates don't match, it's been at least a day
-			* This is a simplified approach - for production might want Clock calculations
-			if ("`check_date'" != "`current_date'") {
-				local should_check = 1
-			}
-		}
-		else {
-			* Malformed timestamp, check anyway
+		* 24 hours = 86,400,000 milliseconds
+		if (`time_diff_ms' >= 86400000) {
 			local should_check = 1
 		}
 	}
@@ -265,10 +258,9 @@ program define _upd_check_background
 			}
 
 			* Only update last_update_check if API call succeeded
+			* Store as numeric clock value (ms since 1960) for easy comparison
 			if ("`reason'" == "success") {
-				local check_date "`c(current_date)'"
-				local check_time "`c(current_time)'"
-				cap _rs_config set "`registream_dir'" "last_update_check" "`check_date'T`check_time'Z"
+				cap _rs_config set "`registream_dir'" "last_update_check" "`current_clock'"
 			}
 		}
 	}
@@ -301,6 +293,166 @@ program define _upd_show_notification
 		di as result "{hline 60}"
 		di as text ""
 	}
+end
+
+* -----------------------------------------------------------------------------
+* send_heartbeat: Consolidated telemetry + update check via native Stata copy
+* TELEMETRY: Sent on EVERY command (if enabled) to track usage
+* UPDATES: Checked once per 24 hours (proper timestamp comparison, not just date)
+* Uses GET request with query params - ZERO shell commands, ZERO flashes
+* Args: registream_dir, current_version, command_string
+* Returns: Updates globals if update available
+* -----------------------------------------------------------------------------
+program define _upd_send_heartbeat
+	args registream_dir current_version command_string
+
+	* Get settings
+	_rs_config get "`registream_dir'" "telemetry_enabled"
+	local telemetry_enabled "`r(value)'"
+
+	_rs_config get "`registream_dir'" "auto_update_check"
+	local update_enabled "`r(value)'"
+	if ("`update_enabled'" == "") local update_enabled "true"
+
+	* Determine if we should send telemetry (every command if enabled)
+	local send_telemetry = 0
+	if ("`telemetry_enabled'" == "true" | "`telemetry_enabled'" == "1") {
+		local send_telemetry = 1
+	}
+
+	* Get current time as Stata clock (ms since 1960-01-01)
+	local current_clock = clock("`c(current_date)' `c(current_time)'", "DMY hms")
+
+	* Determine if we should check for updates (once per 24 hours if enabled)
+	local check_updates = 0
+	if ("`update_enabled'" == "true" | "`update_enabled'" == "1") {
+		_rs_config get "`registream_dir'" "last_update_check"
+		local last_check "`r(value)'"
+
+		if ("`last_check'" == "" | "`last_check'" == ".") {
+			* Never checked before
+			local check_updates = 1
+		}
+		else {
+			* Calculate time difference in milliseconds
+			local time_diff_ms = `current_clock' - `last_check'
+
+			* 24 hours = 86,400,000 milliseconds
+			if (`time_diff_ms' >= 86400000) {
+				local check_updates = 1
+			}
+		}
+	}
+
+	* If neither telemetry nor updates needed, exit early
+	if (`send_telemetry' == 0 & `check_updates' == 0) {
+		exit 0
+	}
+
+	* If only checking updates and cache is still valid, read from cache
+	if (`send_telemetry' == 0 & `check_updates' == 0) {
+		* Read cached update info from config
+		_rs_config get "`registream_dir'" "update_available"
+		if (r(found) == 1 & "`r(value)'" == "true") {
+			global REGISTREAM_UPDATE_AVAILABLE = 1
+			_rs_config get "`registream_dir'" "latest_version"
+			global REGISTREAM_LATEST_VERSION "`r(value)'"
+		}
+		else {
+			global REGISTREAM_UPDATE_AVAILABLE = 0
+			global REGISTREAM_LATEST_VERSION ""
+		}
+		exit 0
+	}
+
+	* Get API host
+	_rs_utils get_api_host
+	local api_host "`r(host)'"
+
+	* Get timestamp (always needed)
+	local timestamp "`c(current_date)'T`c(current_time)'Z"
+
+	* Build heartbeat URL based on what we're sending
+	if (`send_telemetry' == 1) {
+		* Get telemetry data
+		_rs_usage compute_user_id "`registream_dir'"
+		local user_id "`r(user_id)'"
+
+		* Get OS info
+		local platform "stata"
+		local os "`c(os)'"
+		if ("`os'" == "Windows") {
+			local os "Windows"
+		}
+		else if ("`os'" == "Unix") {
+			* Distinguish MacOS from Linux
+			if ("`c(machine_type)'" == "Macintosh (Intel 64-bit)" | "`c(machine_type)'" == "Macintosh (ARM 64-bit)") {
+				local os "MacOSX"
+			}
+			else {
+				local os "Linux"
+			}
+		}
+		local platform_version "`c(stata_version)'"
+
+		* URL encode timestamp (spaces -> %20)
+		local timestamp_encoded : subinstr local timestamp " " "%20", all
+
+		* URL encode command string
+		local command_encoded : subinstr local command_string " " "%20", all
+		local command_encoded : subinstr local command_encoded "," "%2C", all
+		local command_encoded : subinstr local command_encoded "(" "%28", all
+		local command_encoded : subinstr local command_encoded ")" "%29", all
+
+		* Build URL with telemetry data (always include version for proper tracking)
+		local heartbeat_url "`api_host'/api/v1/stata/heartbeat?user_id=`user_id'&command=`command_encoded'&platform=`platform'&os=`os'&platform_version=`platform_version'&timestamp=`timestamp_encoded'&version=`current_version'"
+	}
+	else {
+		* Only checking updates, no telemetry data
+		local heartbeat_url "`api_host'/api/v1/stata/heartbeat?version=`current_version'"
+	}
+
+	* Use native Stata copy - NO SHELL, NO FLASH!
+	tempfile response
+	cap copy "`heartbeat_url'" "`response'", replace
+
+	if (_rc == 0) {
+		* Parse response (simple JSON parsing for update_available)
+		tempname fh
+		cap file open `fh' using "`response'", read text
+		if (_rc == 0) {
+			file read `fh' json_line
+			file close `fh'
+
+			* Extract update_available (look for "update_available": true/false)
+			if (regexm(`"`json_line'"', `""update_available"[[:space:]]*:[[:space:]]*true"')) {
+				global REGISTREAM_UPDATE_AVAILABLE = 1
+
+				* Extract latest_version
+				if (regexm(`"`json_line'"', `""latest_version"[[:space:]]*:[[:space:]]*"([^"]+)""')) {
+					global REGISTREAM_LATEST_VERSION = regexs(1)
+
+					* Persist to config for cross-session notifications
+					cap _rs_config set "`registream_dir'" "update_available" "true"
+					cap _rs_config set "`registream_dir'" "latest_version" "`=regexs(1)'"
+				}
+			}
+			else {
+				global REGISTREAM_UPDATE_AVAILABLE = 0
+				global REGISTREAM_LATEST_VERSION ""
+				cap _rs_config set "`registream_dir'" "update_available" "false"
+				cap _rs_config set "`registream_dir'" "latest_version" ""
+			}
+
+			* Update last check timestamp ONLY if we checked for updates
+			* Store as numeric clock value (ms since 1960) for easy comparison
+			if (`check_updates' == 1) {
+				cap _rs_config set "`registream_dir'" "last_update_check" "`current_clock'"
+			}
+		}
+	}
+
+	* Silent on all outcomes - heartbeat should never interrupt user workflow
 end
 
 * -----------------------------------------------------------------------------
@@ -392,6 +544,29 @@ program define _upd_check_datasets, rclass
 		exit 0
 	}
 
+	* Get current time for caching
+	local current_clock = clock("`c(current_date)' `c(current_time)'", "DMY hms")
+
+	* Check 24h cache first
+	_rs_config get "`registream_dir'" "last_dataset_check"
+	local last_check "`r(value)'"
+
+	if ("`last_check'" != "" & "`last_check'" != ".") {
+		* Calculate time difference
+		local time_diff_ms = `current_clock' - `last_check'
+
+		* If less than 24 hours, return cached result
+		if (`time_diff_ms' < 86400000) {
+			_rs_config get "`registream_dir'" "datasets_updates_available"
+			local cached_count = "`r(value)'"
+			if ("`cached_count'" == "" | "`cached_count'" == ".") local cached_count = 0
+
+			return scalar updates_available = `cached_count'
+			return local reason "cached"
+			exit 0
+		}
+	}
+
 	* Read datasets.csv to get current versions
 	local meta_csv "`registream_dir'/autolabel_keys/datasets.csv"
 
@@ -429,8 +604,8 @@ program define _upd_check_datasets, rclass
 		local should_check_redownload = 0
 	}
 
-	* Build CSV request from datasets.csv
-	tempfile request_body response_body
+	* Build GET URL from datasets.csv
+	tempfile response_body
 
 	quietly {
 		* Load datasets.csv
@@ -449,21 +624,45 @@ program define _upd_check_datasets, rclass
 			exit 0
 		}
 
-		* Keep only needed columns and export
-		* (domain, type, lang already exist in datasets.csv)
-		keep version schema domain type lang
-		export delimited using "`request_body'", replace delimiter(";")
+		* Keep only needed columns
+		keep version domain type lang dataset_key
+
+		* Build pipe-delimited URL parameter
+		local url_params = ""
+		forval i = 1/`=_N' {
+			local domain_val = domain[`i']
+			local type_val = type[`i']
+			local lang_val = lang[`i']
+			local version_val = version[`i']
+
+			if (`i' > 1) local url_params = "`url_params'|"
+			local url_params = "`url_params'`domain_val';`type_val';`lang_val';`version_val'"
+		}
+
+		* URL encode special characters
+		local url_params : subinstr local url_params "|" "%7C", all
+		local url_params : subinstr local url_params ";" "%3B", all
+	}
+
+	* Check URL length safety (fallback to POST if too long)
+	local url_length = length("`url_params'")
+	if (`url_length' > 1500) {
+		di as error "Too many datasets (`dataset_count') for GET request"
+		di as error "Please contact support - this is a rare edge case"
+		return scalar updates_available = 0
+		return local reason "too_many_datasets"
+		exit 0
 	}
 
 	* Get API host
 	_rs_utils get_api_host
 	local api_host "`r(host)'"
 
-	* Construct bulk update check endpoint with CSV format
-	local updates_url "`api_host'/api/v1/datasets/check_updates?format=csv"
+	* Construct GET URL with datasets parameter
+	local updates_url "`api_host'/api/v1/datasets/check_updates?datasets=`url_params'"
 
-	* Send POST request with CSV
-	cap qui shell curl -s -m 10 -X POST -H "Content-Type: text/csv" --data-binary @"`request_body'" "`updates_url'" > "`response_body'"
+	* Use native Stata copy - NO SHELL, NO FLASH!
+	cap copy "`updates_url'" "`response_body'", replace
 
 	if (_rc != 0) {
 		* Network error
@@ -517,11 +716,19 @@ program define _upd_check_datasets, rclass
 			di as text ""
 		}
 
+		* Save to cache
+		cap _rs_config set "`registream_dir'" "last_dataset_check" "`current_clock'"
+		cap _rs_config set "`registream_dir'" "datasets_updates_available" "`updates_count'"
+
 		return scalar updates_available = `updates_count'
 		return scalar redownload_suggested = `redownload_count'
 		return local reason "success"
 	}
 	else {
+		* Save empty cache
+		cap _rs_config set "`registream_dir'" "last_dataset_check" "`current_clock'"
+		cap _rs_config set "`registream_dir'" "datasets_updates_available" "0"
+
 		return scalar updates_available = 0
 		return local reason "parse_error"
 	}
@@ -534,7 +741,7 @@ end
 * -----------------------------------------------------------------------------
 program define _upd_update_datasets_interactive, rclass
 	syntax anything [, DOMAIN(string) LANG(string)]
-	local registream_dir "`anything'"
+	local registream_dir `anything'
 
 	* Check internet access setting
 	_rs_config get "`registream_dir'" "internet_access"
@@ -550,9 +757,14 @@ program define _upd_update_datasets_interactive, rclass
 	local meta_csv "`registream_dir'/autolabel_keys/datasets.csv"
 	local autolabel_dir "`registream_dir'/autolabel_keys"
 
-	* Check if datasets.csv exists
-	cap confirm file "`meta_csv'"
+	tempfile response_body
+
+	* Load datasets.csv
+	preserve
+	cap qui import delimited using "`meta_csv'", clear varnames(1) stringcols(_all) delimiter(";")
+
 	if (_rc != 0) {
+		restore
 		di as text "No datasets found to check for updates"
 		di as text "Download datasets first: autolabel variables, domain(scb) lang(eng)"
 		return scalar updates_downloaded = 0
@@ -560,62 +772,67 @@ program define _upd_update_datasets_interactive, rclass
 		exit 0
 	}
 
-	* Build CSV request from datasets.csv
-	tempfile request_body response_body
-
-	preserve
-	quietly {
-		* Load datasets.csv
-		cap import delimited using "`meta_csv'", clear varnames(1) stringcols(_all) delimiter(";")
-		if (_rc != 0) {
-			restore
-			di as error "Error reading datasets.csv"
-			return scalar updates_downloaded = 0
-			return local reason "csv_read_error"
-			exit 0
-		}
-
-		local dataset_count = _N
-
-		if (`dataset_count' == 0) {
-			restore
-			di as text "No datasets found to check for updates"
-			return scalar updates_downloaded = 0
-			return local reason "no_datasets"
-			exit 0
-		}
-
-		* Apply filters if specified
-		if ("`domain'" != "") {
-			keep if domain == "`domain'"
-		}
-		if ("`lang'" != "") {
-			keep if lang == "`lang'"
-		}
-
-		if (_N == 0) {
-			restore
-			di as text "No datasets match the specified filters"
-			return scalar updates_downloaded = 0
-			return local reason "no_matching_datasets"
-			exit 0
-		}
-
-		* Keep only needed columns and export
-		keep version schema domain type lang
-		export delimited using "`request_body'", replace delimiter(";")
+	if (_N == 0) {
+		restore
+		di as text "No datasets found"
+		return scalar updates_downloaded = 0
+		return local reason "no_datasets"
+		exit 0
 	}
+
+	* Apply filters if specified
+	if ("`domain'" != "") {
+		qui keep if domain == "`domain'"
+	}
+	if ("`lang'" != "") {
+		qui keep if lang == "`lang'"
+	}
+
+	if (_N == 0) {
+		restore
+		di as text "No datasets match the specified filters"
+		return scalar updates_downloaded = 0
+		return local reason "no_matching_datasets"
+		exit 0
+	}
+
+	* Build pipe-delimited URL parameter
+	local url_params = ""
+	forval i = 1/`=_N' {
+		local domain_val = domain[`i']
+		local type_val = type[`i']
+		local lang_val = lang[`i']
+		local version_val = version[`i']
+
+		if (`i' > 1) local url_params = "`url_params'|"
+		local url_params = "`url_params'`domain_val';`type_val';`lang_val';`version_val'"
+	}
+
+	* URL encode special characters
+	local url_params : subinstr local url_params "|" "%7C", all
+	local url_params : subinstr local url_params ";" "%3B", all
+
 	restore
+
+	* Check URL length safety
+	local url_length = length("`url_params'")
+	if (`url_length' > 1500) {
+		di as error "Too many datasets for GET request"
+		di as error "Please contact support - this is a rare edge case"
+		return scalar updates_downloaded = 0
+		return local reason "too_many_datasets"
+		exit 0
+	}
 
 	* Get API host
 	_rs_utils get_api_host
 	local api_host "`r(host)'"
 
-	* Construct bulk update check endpoint with CSV format
-	local updates_url "`api_host'/api/v1/datasets/check_updates?format=csv"
+	* Construct GET URL with datasets parameter
+	local updates_url "`api_host'/api/v1/datasets/check_updates?datasets=`url_params'"
 
-	* Send POST request with CSV
-	cap qui shell curl -s -m 10 -X POST -H "Content-Type: text/csv" --data-binary @"`request_body'" "`updates_url'" > "`response_body'"
+	* Use native Stata copy - NO SHELL, NO FLASH!
+	cap copy "`updates_url'" "`response_body'", replace
 
 	if (_rc != 0) {
 		di as text "Could not check for updates (network error)"
@@ -648,28 +865,36 @@ program define _upd_update_datasets_interactive, rclass
 		exit 0
 	}
 
+	* Save update information to locals BEFORE restoring
+	forval i = 1/`updates_count' {
+		local upd_`i'_domain = domain[`i']
+		local upd_`i'_type = type[`i']
+		local upd_`i'_lang = lang[`i']
+		local upd_`i'_current = current_version[`i']
+		local upd_`i'_latest = latest_version[`i']
+	}
+
+	restore
+
 	* Display numbered list of updates
 	di as text ""
 	di as text "Available Updates:"
 	di as text "{hline 70}"
 	forval i = 1/`updates_count' {
-		local ds_domain = domain[`i']
-		local ds_type = type[`i']
-		local ds_lang = lang[`i']
-		local ds_current = current_version[`i']
-		local ds_latest = latest_version[`i']
-
-		local ds_key "`ds_domain'_`ds_type'_`ds_lang'"
+		local ds_key "`upd_`i'_domain'_`upd_`i'_type'_`upd_`i'_lang'"
 		di as text %3.0f `i' ".  {result:`ds_key'}"
-		di as text "     Current: `ds_current' → Latest: `ds_latest'"
+		di as text "     Current: `upd_`i'_current' → Latest: `upd_`i'_latest'"
 	}
 	di as text "{hline 70}"
 	di as text ""
 
-	* Prompt for selection
+	* Prompt for selection (NOW outside preserve/restore)
 	di as text "Enter dataset numbers to update (comma-separated) or 'all':"
-	di as input "> " _request(user_input)
-	local user_input = trim(`"`r(user_input)'"')
+	di as input "> " _request(rsinput)
+
+	* _request MUST use global (Stata limitation), copy to local and clear
+	local user_input = trim("$rsinput")
+	global rsinput ""
 
 	* Handle 'all' selection
 	if ("`user_input'" == "all") {
@@ -682,14 +907,16 @@ program define _upd_update_datasets_interactive, rclass
 	else {
 		local selection_count = 0
 
+		* Remove all spaces to make parsing easier
+		local user_input : subinstr local user_input " " "", all
+
 		* Split by comma and validate
 		local remaining "`user_input'"
 		while ("`remaining'" != "") {
 			gettoken num remaining : remaining, parse(",")
-			local num = trim("`num'")
 
-			* Skip commas
-			if ("`num'" == ",") continue
+			* Skip commas and empty strings
+			if ("`num'" == "," | "`num'" == "") continue
 
 			* Validate number
 			cap confirm integer number `num'
@@ -700,7 +927,6 @@ program define _upd_update_datasets_interactive, rclass
 		}
 
 		if (`selection_count' == 0) {
-			restore
 			di as error "No valid selections provided"
 			return scalar updates_downloaded = 0
 			return local reason "invalid_selection"
@@ -708,15 +934,8 @@ program define _upd_update_datasets_interactive, rclass
 		}
 	}
 
-	* Save update information to locals before restoring
-	forval i = 1/`selection_count' {
-		local idx = `sel_`i''
-		local upd_`i'_domain = domain[`idx']
-		local upd_`i'_type = type[`idx']
-		local upd_`i'_lang = lang[`idx']
-		local upd_`i'_latest = latest_version[`idx']
-	}
-	restore
+	* Map selections to the saved update info
+	* (Data was already saved to upd_* locals and restored earlier)
 
 	* Download selected datasets
 	di as text ""
@@ -727,12 +946,17 @@ program define _upd_update_datasets_interactive, rclass
 	local downloaded_count = 0
 
 	forval i = 1/`selection_count' {
-		local ds_domain = "`upd_`i'_domain'"
-		local ds_type = "`upd_`i'_type'"
-		local ds_lang = "`upd_`i'_lang'"
-		local ds_latest = "`upd_`i'_latest'"
+		* Map selection to update index
+		local idx = `sel_`i''
+		local ds_domain = "`upd_`idx'_domain'"
+		local ds_type_raw = "`upd_`idx'_type'"
+		local ds_lang = "`upd_`idx'_lang'"
+		local ds_latest = "`upd_`idx'_latest'"
 
-		* Convert type for filename
+		* Normalize type: API returns "value_labels" or "values", schema expects "values" or "variables"
+		local ds_type = cond("`ds_type_raw'" == "value_labels", "values", "`ds_type_raw'")
+
+		* Convert type for filename: schema type to filename type
 		local file_type = cond("`ds_type'" == "values", "value_labels", "variables")
 		local filename "`ds_domain'_`file_type'_`ds_lang'"
 
@@ -752,8 +976,8 @@ program define _upd_update_datasets_interactive, rclass
 		cap erase "`zip_file'"
 		cap _rs_utils del_folder_rec "`zip_folder'"
 
-		* Download using autolabel utils
-		cap noi _rs_autolabel_utils download_extract, ///
+		* Download using autolabel utils (quietly to suppress verbose output)
+		cap qui _rs_autolabel_utils download_extract, ///
 			zip("`zip_file'") zipfold("`zip_folder'") ///
 			csv("`csv_file'") dta("`dta_file'") ///
 			file("`filename'") ///

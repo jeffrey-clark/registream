@@ -31,22 +31,22 @@ program define autolabel
 
 	if ("`first_arg'" == "info") {
 		_autolabel_info `rest'
-		_autolabel_wrapper_end "`REGISTREAM_VERSION'"
+		_autolabel_wrapper_end "`REGISTREAM_VERSION'" "`registream_dir'" "`0'"
 		exit 0
 	}
 	else if ("`first_arg'" == "update") {
 		_autolabel_update `rest'
-		_autolabel_wrapper_end "`REGISTREAM_VERSION'"
+		_autolabel_wrapper_end "`REGISTREAM_VERSION'" "`registream_dir'" "`0'"
 		exit 0
 	}
 	else if ("`first_arg'" == "version") {
 		_autolabel_version `rest'
-		_autolabel_wrapper_end "`REGISTREAM_VERSION'"
+		_autolabel_wrapper_end "`REGISTREAM_VERSION'" "`registream_dir'" "`0'"
 		exit 0
 	}
 	else if ("`first_arg'" == "cite") {
 		_autolabel_cite `rest'
-		_autolabel_wrapper_end "`REGISTREAM_VERSION'"
+		_autolabel_wrapper_end "`REGISTREAM_VERSION'" "`registream_dir'" "`0'"
 		exit 0
 	}
 
@@ -55,6 +55,9 @@ program define autolabel
     * Followed by an optional varlist, and options: domain, exclude, lang
     syntax anything(name=arguments) , DOMAIN(string) LANG(string) [ EXCLUDE(varlist) SUFFIX(string)]
 
+	* Normalize domain and lang to lowercase immediately (case-insensitive)
+	local domain = lower("`domain'")
+	local lang = lower("`lang'")
 
 	* -----  PARSE THE LABEL_TYPE AND VARLIST ---------
 
@@ -151,8 +154,8 @@ program define autolabel
 	}
 
 	* ----- DOMAIN, LANGUAGE, DATA_DIR IDENTIFICATION  ---------
-   
-   
+
+
     * Ensure domain is specified
     if "`domain'" == "" {
         di as error "Domain not specified. Please specify a domain (e.g., domain(scb))."
@@ -231,10 +234,16 @@ program define autolabel
     csv("`var_filepath_csv'") dta("`var_filepath_dta'") file("`var_filename'") ///
     registream_dir("`registream_dir'") autolabel_dir("`autolabel_dir'") clean("variables")
 
+	* Capture update info for variables dataset (used by all commands)
+	local var_status "`r(status)'"
+	local var_key "`r(dataset_key)'"
+	local var_current "`r(local_version)'"
+	local var_latest "`r(api_version)'"
+
 	* -----  END DOWNLOAD AND EXTRACT VARIABLE DATA ---------
-	
-	
-	
+
+
+
 	* ----- AUTOLABEL VARIABLES ---------
 
     if "`label_type'" == "variables" {
@@ -310,6 +319,9 @@ program define autolabel
 		di as text "  Language: {result:`lang'}"
 		di as text ""
 
+		* Display update message if available (AFTER applying labels)
+		_rs_autolabel_utils show_updates "`var_status'" "`var_key'" "`var_current'" "`var_latest'" "" "" "" ""
+
     }
 
 	* ----- AUTOLABEL VALUE LABELS ---------
@@ -329,8 +341,13 @@ program define autolabel
 		_rs_autolabel_utils download_extract, zip("`val_filepath_zip'") zipfold("`val_filepath_zipfold'") ///
     csv("`val_filepath_csv'") dta("`val_filepath_dta'") file("`val_filename'") ///
     registream_dir("`registream_dir'") autolabel_dir("`autolabel_dir'") clean("values")
-		
-		
+
+		* Capture update info for values dataset
+		local val_status "`r(status)'"
+		local val_key "`r(dataset_key)'"
+		local val_current "`r(local_version)'"
+		local val_latest "`r(api_version)'"
+
 		* -----  END DOWNLOAD AND EXTRACT VALUE LABEL  DATA ---------
 		
 
@@ -488,6 +505,10 @@ program define autolabel
 		di as text "  Language: {result:`lang'}"
 		di as text ""
 
+		* Display consolidated update message (AFTER applying labels)
+		_rs_autolabel_utils show_updates "`var_status'" "`var_key'" "`var_current'" "`var_latest'" ///
+										  "`val_status'" "`val_key'" "`val_current'" "`val_latest'"
+
     }
 
 	else if "`label_type'" == "lookup" {
@@ -508,6 +529,11 @@ program define autolabel
 		csv("`var_filepath_csv'") dta("`var_filepath_dta'") file("`var_filename'") ///
 		registream_dir("`registream_dir'") autolabel_dir("`autolabel_dir'") clean("variables")
 
+		* Capture update info for variables dataset
+		local var_status "`r(status)'"
+		local var_key "`r(dataset_key)'"
+		local var_current "`r(local_version)'"
+		local var_latest "`r(api_version)'"
 
 		* Construct the file paths
 		local val_filename = "`domain'_value_labels_`lang'"
@@ -515,12 +541,16 @@ program define autolabel
 		local val_filepath_zipfold "`autolabel_dir'/`val_filename'"
 		local val_filepath_csv = "`autolabel_dir'/`val_filename'.csv"
 		local val_filepath_dta = "`autolabel_dir'/`val_filename'.dta"
-		
+
 		_rs_autolabel_utils download_extract, zip("`val_filepath_zip'") zipfold("`val_filepath_zipfold'") ///
 		csv("`val_filepath_csv'") dta("`val_filepath_dta'") file("`val_filename'") ///
 		registream_dir("`registream_dir'") autolabel_dir("`autolabel_dir'") clean("values")
-			
 
+		* Capture update info for values dataset
+		local val_status "`r(status)'"
+		local val_key "`r(dataset_key)'"
+		local val_current "`r(local_version)'"
+		local val_latest "`r(api_version)'"
 
 		di as text ""
 		di as text "Looking up variable definitions..."
@@ -668,15 +698,19 @@ program define autolabel
 			di as error _dup(90)("-")
 		}
 
+		* Display consolidated update message (AFTER lookup results)
+		_rs_autolabel_utils show_updates "`var_status'" "`var_key'" "`var_current'" "`var_latest'" ///
+										  "`val_status'" "`val_key'" "`val_current'" "`val_latest'"
+
 	restore
 
 	}
 
 	* ==========================================================================
-	* MASTER WRAPPER (END): Show update notification
+	* MASTER WRAPPER (END): Async telemetry + update check + notification
 	* Runs for ALL autolabel commands
 	* ==========================================================================
-	_autolabel_wrapper_end "`REGISTREAM_VERSION'"
+	_autolabel_wrapper_end "`REGISTREAM_VERSION'" "`registream_dir'" "`0'"
 
 end
 
@@ -699,32 +733,54 @@ program define _autolabel_wrapper_start, rclass
 	* Parse command for conditional logic
 	local first_word : word 1 of `command_line'
 
-	* Log local usage
+	* Log local usage (fast, synchronous)
 	_rs_config get "`registream_dir'" "usage_logging"
 	if (r(value) == "true" | r(value) == "1") {
 		_rs_usage init "`registream_dir'"
 		_rs_usage log "`registream_dir'" "autolabel `command_line'" "`current_version'"
 	}
 
-	* Send online telemetry (if enabled and internet available)
+	* NOTE: Telemetry and update check moved to wrapper_end for async execution
+	* This ensures instant startup with no blocking on network operations
+end
+
+* Wrapper end: Consolidated heartbeat (telemetry + update check) + notification
+program define _autolabel_wrapper_end
+	args current_version registream_dir command_line
+
+	* Get registream directory if not provided
+	if ("`registream_dir'" == "") {
+		_rs_utils get_dir
+		local registream_dir "`r(dir)'"
+	}
+
+	* Parse command for conditional logic
+	if ("`command_line'" != "") {
+		gettoken first_word rest : command_line, parse(" ,")
+	}
+
+	* Check if we should send heartbeat (telemetry OR update check enabled)
 	_rs_config get "`registream_dir'" "telemetry_enabled"
 	local telemetry_enabled = r(value)
 	_rs_config get "`registream_dir'" "internet_access"
 	local internet_access = r(value)
+	_rs_config get "`registream_dir'" "auto_update_check"
+	local auto_update_enabled = r(value)
 
-	if (("`telemetry_enabled'" == "true" | "`telemetry_enabled'" == "1") & ("`internet_access'" == "true" | "`internet_access'" == "1")) {
-		cap qui _rs_usage send_online "`registream_dir'" "autolabel `command_line'" "`current_version'"
+	* Default to true if not found
+	if ("`auto_update_enabled'" == "") local auto_update_enabled "true"
+
+	* Send heartbeat if: (telemetry OR update_check) AND internet AND not "update" command
+	local should_heartbeat = 0
+	if (("`telemetry_enabled'" == "true" | "`telemetry_enabled'" == "1" | "`auto_update_enabled'" == "true" | "`auto_update_enabled'" == "1") & ("`internet_access'" == "true" | "`internet_access'" == "1") & "`first_word'" != "update") {
+		local should_heartbeat = 1
 	}
 
-	* Run background update check (skip "update" to avoid duplicate checks)
-	if ("`first_word'" != "update") {
-		cap qui _rs_updates check_background "`registream_dir'" "`current_version'"
+	if (`should_heartbeat' == 1) {
+		* Consolidated heartbeat: telemetry + update check in one request
+		* Uses native Stata copy - ZERO shell commands, ZERO flashes
+		cap qui _rs_updates send_heartbeat "`registream_dir'" "`current_version'" "autolabel `command_line'"
 	}
-end
-
-* Wrapper end: Show update notification
-program define _autolabel_wrapper_end
-	args current_version
 
 	* Show update notification if available
 	_rs_updates show_notification "`current_version'"

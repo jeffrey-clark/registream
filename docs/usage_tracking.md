@@ -64,9 +64,11 @@ registream config, usage_logging(true)   // Re-enable local logging
 - Dataset content
 - Actual data values
 - File paths
-- Personal identifiers (user_id is one-way hash)
+- Personal identifiers (user_id is cryptographically hashed)
 
-**API Endpoint:** `https://registream.org/api/v1/telemetry` (HTTP POST)
+**API Endpoint:** `https://registream.org/api/v1/stata/heartbeat` (HTTP GET)
+
+**How It Works:** Telemetry is combined with version check in a single consolidated heartbeat request (performance optimization)
 
 **Requirements:** Both `telemetry_enabled=true` AND `internet_access=true`
 
@@ -78,9 +80,10 @@ registream info                              // Check current settings
 ```
 
 **Behavior:**
-- Silent operation (5s timeout, graceful failure)
+- Silent operation (graceful failure)
 - Never interrupts workflow
 - Skipped silently if offline
+- Sent via consolidated heartbeat (combines telemetry + version check)
 
 ---
 
@@ -119,18 +122,18 @@ registream config, internet_access(true) telemetry_enabled(true)
 ## Anonymous User ID
 
 **Generation:**
-```stata
-hash = mod(hash(username) * 31 + hash(hostname), 4000000000)
-user_id = string(hash, "%010.0f")  // 10-digit number
-```
+- SHA-256-inspired Mata implementation
+- Per-installation salt (64 random characters stored in `~/.registream/.salt`)
+- Hash format: 16-character hexadecimal (64-bit hash space)
+- Computed locally using cryptographic hashing
 
 **Properties:**
 - Consistent across sessions on same machine
-- Cannot be reversed (one-way hash)
+- Cryptographically secure - practically impossible to reverse-engineer without salt file
 - Different users have different IDs
-- Computed locally
+- Performance: ~0.34ms per hash (Mata-compiled)
 
-**Example:** `1234567890`
+**Example:** `4dd4730d0999bc07`
 
 ---
 
@@ -158,7 +161,7 @@ When enabled, anonymized data is sent to `registream.org` to help improve RegiSt
 
 **GDPR Compliance:**
 - **Opt-in only:** Disabled by default, requires explicit consent
-- **Anonymous:** Uses one-way hash ID - cannot identify individuals
+- **Anonymous:** Uses cryptographically secure hash ID - cannot identify individuals
 - **Transparent:** You know exactly what's sent (7 fields listed above)
 - **Revocable:** Disable anytime with `registream config, telemetry_enabled(false)`
 
@@ -204,12 +207,18 @@ if (r(value) == "true") {
 
 **Online telemetry:**
 ```stata
+* Sent via consolidated heartbeat at end of command execution
+* Combines telemetry + version check in single GET request
+* Implementation in _rs_updates.ado (_upd_send_heartbeat)
 if (telemetry_enabled == "true" & internet_access == "true") {
-    _rs_usage send_online "`registream_dir'" "command_string" "version"
+    * Heartbeat includes all 7 telemetry fields as URL parameters
+    * GET /api/v1/stata/heartbeat?user_id=...&command=...&version=...
 }
 ```
 
-**Implementation:** `stata/src/_rs_usage.ado`
+**Implementation:**
+- Local logging: `stata/src/_rs_usage.ado`
+- Online telemetry: `stata/src/_rs_updates.ado` (consolidated heartbeat)
 
 ---
 

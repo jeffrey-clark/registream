@@ -71,6 +71,9 @@ program define _rs_autolabel_utils, rclass
 		_al_validate_local `0'
 		return add
 	}
+	else if ("`subcmd'" == "show_updates") {
+		_al_show_updates `0'
+	}
 	else {
 		di as error "Invalid _rs_autolabel_utils subcommand: `subcmd'"
 		exit 198
@@ -121,6 +124,12 @@ program define _al_download, rclass
 	* Check for updates / version tracking (only if internet enabled)
 	* This informs users about API availability and version updates
 	_rs_autolabel_utils check_for_updates "`autolabel_dir'" "`check_domain'" "`check_type'" "`check_lang'" "`dta'"
+
+	* Capture update check results to return to caller
+	local update_status "`r(status)'"
+	local update_dataset_key "`r(dataset_key)'"
+	local update_local_version "`r(local_version)'"
+	local update_api_version "`r(api_version)'"
 
 	* Ensure that the CSV file exists
 	if (fileexists("`csv'") == 0) {
@@ -367,6 +376,12 @@ program define _al_download, rclass
 			restore
 		}
 	}
+
+	* Return update check results to caller
+	return local status "`update_status'"
+	return local dataset_key "`update_dataset_key'"
+	return local local_version "`update_local_version'"
+	return local api_version "`update_api_version'"
 end
 
 * -----------------------------------------------------------------------------
@@ -692,8 +707,8 @@ program define _al_store_meta
 	local file_type = cond("`type'" == "values", "value_labels", "`type'")
 	local dataset_key "`domain'_`file_type'_`lang'"
 
-	* Get current timestamp (ISO 8601 format)
-	local timestamp "`c(current_date)'T`c(current_time)'Z"
+	* Get current timestamp (numeric clock value for easy comparison)
+	local timestamp = clock("`c(current_date)' `c(current_time)'", "DMY hms")
 
 	* Get file size using Mata (cross-platform: Windows, Mac, Linux)
 	local file_size = 0
@@ -715,7 +730,7 @@ program define _al_store_meta
 		cap file close metafile
 		file open metafile using "`meta_csv'", write replace
 		file write metafile "dataset_key;domain;type;lang;version;schema;downloaded;source;file_size;last_checked" _n
-		file write metafile "`dataset_key';`domain';`type';`lang';`ds_version';`ds_schema';`timestamp';api;`file_size';" _n
+		file write metafile "`dataset_key';`domain';`type';`lang';`ds_version';`ds_schema';`timestamp';api;`file_size';`timestamp'" _n
 		file close metafile
 	}
 	else {
@@ -745,7 +760,7 @@ program define _al_store_meta
 				restore
 				cap file close metafile
 				file open metafile using "`meta_csv'", write append
-				file write metafile "`dataset_key';`domain';`type';`lang';`ds_version';`ds_schema';`timestamp';api;`file_size';" _n
+				file write metafile "`dataset_key';`domain';`type';`lang';`ds_version';`ds_schema';`timestamp';api;`file_size';`timestamp'" _n
 				file close metafile
 				exit 0
 			}
@@ -932,23 +947,14 @@ program define _al_check_updates, rclass
 	local has_version = r(has_version)
 	local last_checked = r(last_checked)
 
-	if (`has_version' == 1 & "`last_checked'" != "") {
-		* Parse last_checked timestamp (format: YYYY-MM-DDTHH:MM:SSZ)
-		local check_date = substr("`last_checked'", 1, 10)
-		local check_year = substr("`check_date'", 1, 4)
-		local check_month = substr("`check_date'", 6, 2)
-		local check_day = substr("`check_date'", 9, 2)
+	if (`has_version' == 1 & "`last_checked'" != "" & "`last_checked'" != ".") {
+		* Calculate time difference using numeric timestamps
+		local current_clock = clock("`c(current_date)' `c(current_time)'", "DMY hms")
+		local time_diff_ms = `current_clock' - `last_checked'
 
-		* Get current date
-		local curr_date = "`c(current_date)'"
-		local curr_year = substr("`curr_date'", 1, 4)
-		local curr_month = substr("`curr_date'", 6, 2)
-		local curr_day = substr("`curr_date'", 9, 2)
-
-		* Simple 24-hour check: if same date, skip API check
-		* (More sophisticated date math would require complex Julian date calculations)
-		if ("`check_year'" == "`curr_year'" & "`check_month'" == "`curr_month'" & "`check_day'" == "`curr_day'") {
-			* Checked today already, skip API ping
+		* If less than 24 hours (86,400,000 ms), skip API check
+		if (`time_diff_ms' < 86400000) {
+			* Checked within 24 hours, skip API ping
 			return scalar checked = 0
 			return local status "cached"
 			exit 0
@@ -1050,17 +1056,10 @@ program define _al_check_updates, rclass
 
 	* Case 2: Dataset IS in datasets.csv - check for updates
 	if ("`api_version'" != "" & "`api_version'" != "`local_version'") {
-		* Newer version available
-		di as text ""
-		di as result "Update Available"
-		di as text "Dataset: {result:`domain'_`type'_`lang'}"
-		di as text "Current: {result:`local_version'}"
-		di as text "Latest:  {result:`api_version'}"
-		di as text "To update: Use 'autolabel update' command or delete local files and re-run"
-		di as text ""
-
+		* Newer version available - return info without displaying
 		return scalar checked = 1
 		return local status "update_available"
+		return local dataset_key "`domain'_`type'_`lang'"
 		return local local_version "`local_version'"
 		return local api_version "`api_version'"
 	}
@@ -1082,8 +1081,8 @@ program define _al_update_checked
 	local file_type = cond("`type'" == "values", "value_labels", "`type'")
 	local dataset_key "`domain'_`file_type'_`lang'"
 
-	* Get current timestamp
-	local timestamp "`c(current_date)'T`c(current_time)'Z"
+	* Get current timestamp (numeric clock value for easy comparison)
+	local timestamp = clock("`c(current_date)' `c(current_time)'", "DMY hms")
 
 	* CSV file location
 	local meta_csv "`autolabel_dir'/datasets.csv"
@@ -1491,4 +1490,33 @@ program define _al_validate_local, rclass
 	return scalar lang_valid = `lang_valid'
 	return local available_domains "`all_domains'"
 	return local available_languages "`domain_langs'"
+end
+
+* -----------------------------------------------------------------------------
+* show_updates: Display dataset update notifications
+* -----------------------------------------------------------------------------
+program define _al_show_updates
+	args var_status var_key var_current var_latest val_status val_key val_current val_latest
+
+	local has_updates = 0
+	if ("`var_status'" == "update_available") local has_updates = 1
+	if ("`val_status'" == "update_available") local has_updates = 1
+
+	if (`has_updates' == 1) {
+		di as text ""
+		di as result "Dataset Updates Available"
+		di as text _dup(70)("-")
+
+		if ("`var_status'" == "update_available") {
+			di as text "• `var_key': {result:`var_current'} → {result:`var_latest'}"
+		}
+		if ("`val_status'" == "update_available") {
+			di as text "• `val_key': {result:`val_current'} → {result:`val_latest'}"
+		}
+
+		di as text ""
+		di as text "To update: {stata autolabel update datasets:autolabel update datasets}"
+		di as text _dup(70)("-")
+		di as text ""
+	}
 end

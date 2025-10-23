@@ -73,7 +73,7 @@ log using "`log_file'", replace text
 discard
 
 * Add source to adopath and load fresh
-adopath + "$SRC_DIR"
+adopath ++ "$SRC_DIR"
 do "$SRC_DIR/_rs_utils.ado"
 cap do "$SRC_DIR/_rs_dev_utils.ado"
 
@@ -411,7 +411,7 @@ if (`dev_exists') {
 
 	* Restore adopath
 	di as text "  Restoring adopath..."
-	adopath + "$SRC_DIR"
+	adopath ++ "$SRC_DIR"
 }
 
 *==============================================================================

@@ -13,8 +13,11 @@ program define _rs_usage
 	else if ("`subcmd'" == "stats") {
 		_usage_stats `0'
 	}
-	else if ("`subcmd'" == "send_online") {
-		_usage_send_online `0'
+	else if ("`subcmd'" == "ensure_salt") {
+		_usage_ensure_salt `0'
+	}
+	else if ("`subcmd'" == "compute_user_id") {
+		_usage_compute_user_id `0'
 	}
 	else {
 		di as error "Invalid _rs_usage subcommand: `subcmd'"
@@ -28,6 +31,9 @@ program define _usage_init
 
 	* Ensure config exists
 	_rs_config init "`dir'"
+
+	* Ensure salt exists (generate on first run)
+	_usage_ensure_salt "`dir'"
 
 	* Check if usage file exists, create if not
 	local usage_file "`dir'/usage_stata.csv"
@@ -52,28 +58,9 @@ program define _usage_log
 		exit 0
 	}
 
-	* Get user ID (compute hash from username + hostname)
-	local username "`c(username)'"
-	local hostname "`c(hostname)'"
-
-	* Create simple hash from string lengths and character codes
-	local hash 0
-	local chars "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_."
-	forval i = 1/`=min(length("`username'"), 20)' {
-		local char_val = substr("`username'", `i', 1)
-		local pos = strpos("`chars'", "`char_val'")
-		if (`pos' > 0) {
-			local hash = mod(`hash' * 31 + `pos', 4000000000)
-		}
-	}
-	forval i = 1/`=min(length("`hostname'"), 20)' {
-		local char_val = substr("`hostname'", `i', 1)
-		local pos = strpos("`chars'", "`char_val'")
-		if (`pos' > 0) {
-			local hash = mod(`hash' * 31 + `pos', 4000000000)
-		}
-	}
-	local user_id = string(`hash', "%010.0f")
+	* Get user ID (secure hash with per-installation salt)
+	_usage_compute_user_id "`dir'"
+	local user_id "`r(user_id)'"
 
 	* Get current timestamp
 	local timestamp "`c(current_date)'T`c(current_time)'Z"
@@ -109,18 +96,8 @@ program define _usage_log
 
 	file close usagefile
 
-	* Check if online telemetry is enabled
-	_rs_config get "`dir'" "telemetry_enabled"
-	local telemetry_enabled "`r(value)'"
-
-	_rs_config get "`dir'" "internet_access"
-	local internet_access "`r(value)'"
-
-	* Send online telemetry if both enabled
-	if ("`telemetry_enabled'" == "true" & "`internet_access'" == "true") {
-		_usage_send_online "`dir'" "`command_string'" "`version'"
-	}
-
+	* NOTE: Online telemetry now handled by consolidated heartbeat in wrapper_end
+	* This function only handles local CSV logging
 	* Usage tracking is silent - no output displayed to user
 end
 
@@ -140,27 +117,9 @@ program define _usage_stats
 
 	* Get current user ID (if not showing all)
 	if ("`all'" == "") {
-		* Compute hash from username + hostname (same as in _usage_log)
-		local username "`c(username)'"
-		local hostname "`c(hostname)'"
-
-		local hash 0
-		local chars "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_."
-		forval i = 1/`=min(length("`username'"), 20)' {
-			local char_val = substr("`username'", `i', 1)
-			local pos = strpos("`chars'", "`char_val'")
-			if (`pos' > 0) {
-				local hash = mod(`hash' * 31 + `pos', 4000000000)
-			}
-		}
-		forval i = 1/`=min(length("`hostname'"), 20)' {
-			local char_val = substr("`hostname'", `i', 1)
-			local pos = strpos("`chars'", "`char_val'")
-			if (`pos' > 0) {
-				local hash = mod(`hash' * 31 + `pos', 4000000000)
-			}
-		}
-		local my_user_id = string(`hash', "%010.0f")
+		* Compute secure hash (same as in _usage_log)
+		_usage_compute_user_id "`dir'"
+		local my_user_id "`r(user_id)'"
 	}
 
 	* Read CSV with import delimited
@@ -227,89 +186,168 @@ program define _usage_stats
 	di as result ""
 end
 
-* Send telemetry data to registream.org (online telemetry)
-* This function sends anonymized usage data to help improve RegiStream
-* Data sent: timestamp, user_id (hashed), platform, version, command_string, os, platform_version
-* Same 7 fields as local CSV - no additional data collected
-* No dataset content or personal data is transmitted
-program define _usage_send_online
-	args dir command_string version
+* Ensure salt file exists (generate random salt on first run)
+program define _usage_ensure_salt, rclass
+	args dir
 
-	* Get user ID (same hash computation as local logging)
+	local salt_file "`dir'/.salt"
+
+	* Check if salt file exists
+	if (!fileexists("`salt_file'")) {
+		* Generate random salt using Mata
+		mata: _rs_generate_salt("`salt_file'")
+	}
+
+	return local salt_file "`salt_file'"
+end
+
+* Compute secure user ID hash using username + hostname + salt
+program define _usage_compute_user_id, rclass
+	args dir
+
+	* Ensure salt exists
+	_usage_ensure_salt "`dir'"
+	local salt_file "`r(salt_file)'"
+
+	* Get username and hostname
 	local username "`c(username)'"
 	local hostname "`c(hostname)'"
 
-	local hash 0
-	local chars "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_."
-	forval i = 1/`=min(length("`username'"), 20)' {
-		local char_val = substr("`username'", `i', 1)
-		local pos = strpos("`chars'", "`char_val'")
-		if (`pos' > 0) {
-			local hash = mod(`hash' * 31 + `pos', 4000000000)
+	* Read salt and compute hash in Mata
+	mata: st_local("user_id", _rs_compute_secure_hash("`username'", "`hostname'", "`salt_file'"))
+
+	return local user_id "`user_id'"
+end
+
+* ==============================================================================
+* Mata functions for cryptographic hashing
+* ==============================================================================
+
+mata:
+mata clear
+
+// Generate a random 64-character salt and save to file
+void _rs_generate_salt(string scalar filename)
+{
+	real scalar fh, i
+	string scalar salt, chars
+	real scalar seed_value, char_idx
+
+	// Use current time + random seed for entropy
+	seed_value = clock(c("current_time"), "hms") + runiform(1, 1) * 1000000
+	rseed(seed_value)
+
+	// Character set for salt (alphanumeric only for safety)
+	chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	salt = ""
+
+	// Generate 64 random characters
+	for (i = 1; i <= 64; i++) {
+		char_idx = ceil(runiform(1, 1) * strlen(chars))
+		salt = salt + substr(chars, char_idx, 1)
+	}
+
+	// Write to file
+	fh = fopen(filename, "w")
+	fput(fh, salt)
+	fclose(fh)
+}
+
+// Compute SHA-256-inspired hash: hash(username + hostname + salt)
+// Returns 16-character hexadecimal string (64-bit hash space)
+string scalar _rs_compute_secure_hash(string scalar username, string scalar hostname, string scalar salt_file)
+{
+	real scalar fh, i, j, len
+	string scalar salt, input, char
+	real scalar h0, h1, h2, h3, h4, h5, h6, h7
+	real scalar w, a, b, c, d, e, f, g, h, temp1, temp2
+	real vector k
+
+	// Read salt from file
+	fh = fopen(salt_file, "r")
+	salt = fget(fh)
+	fclose(fh)
+
+	// Concatenate inputs
+	input = username + hostname + salt
+	len = strlen(input)
+
+	// Initialize hash values (SHA-256 initial values)
+	h0 = 1779033703  // 0x6a09e667
+	h1 = 3144134277  // 0xbb67ae85
+	h2 = 1013904242  // 0x3c6ef372
+	h3 = 2773480762  // 0xa54ff53a
+	h4 = 1359893119  // 0x510e527f
+	h5 = 2600822924  // 0x9b05688c
+	h6 =  528734635  // 0x1f83d9ab
+	h7 = 1541459225  // 0x5be0cd19
+
+	// Round constants (subset of SHA-256 K constants)
+	k = J(1, 16, .)
+	k[1] = 1116352408;  k[2] = 1899447441;  k[3] = 3049323471;  k[4] = 3921009573
+	k[5] = 961987163;   k[6] = 1508970993;  k[7] = 2453635748;  k[8] = 2870763221
+	k[9] = 3624381080;  k[10] = 310598401;  k[11] = 607225278;  k[12] = 1426881987
+	k[13] = 1925078388; k[14] = 2162078206; k[15] = 2614888103; k[16] = 3248222580
+
+	// Process each character of input
+	for (i = 1; i <= len; i++) {
+		char = substr(input, i, 1)
+		w = ascii(char)
+
+		// Mix character into round constants
+		for (j = 1; j <= 16; j++) {
+			k[j] = mod(k[j] + w * 31 + i * 17, 4294967296)
 		}
 	}
-	forval i = 1/`=min(length("`hostname'"), 20)' {
-		local char_val = substr("`hostname'", `i', 1)
-		local pos = strpos("`chars'", "`char_val'")
-		if (`pos' > 0) {
-			local hash = mod(`hash' * 31 + `pos', 4000000000)
-		}
-	}
-	local user_id = string(`hash', "%010.0f")
 
-	* Get current timestamp
-	local timestamp "`c(current_date)'T`c(current_time)'Z"
+	// Compression function (simplified SHA-256)
+	a = h0; b = h1; c = h2; d = h3
+	e = h4; f = h5; g = h6; h = h7
 
-	* Get system info (use machine type for OS to distinguish macOS from Linux in batch mode)
-	local machine = c(machine_type)
-	local os_raw = c(os)
+	for (j = 1; j <= 16; j++) {
+		// Ch(e,f,g) = (e & f) ^ (~e & g)
+		temp1 = mod(h + k[j], 4294967296)
 
-	* Detect OS using same logic as _rs_utils get_dir
-	if (strpos("`machine'", "Macintosh") > 0 | "`os_raw'" == "MacOSX") {
-		local os "MacOSX"
-	}
-	else if ("`os_raw'" == "Windows") {
-		local os "Windows"
-	}
-	else if ("`os_raw'" == "Unix") {
-		local os "Unix"
-	}
-	else {
-		local os "`os_raw'"
+		// Rotate and mix
+		h = g
+		g = f
+		f = e
+		e = mod(d + temp1, 4294967296)
+		d = c
+		c = b
+		b = a
+		a = mod(temp1 + mod(b + c, 4294967296), 4294967296)
 	}
 
-	local platform_version "`c(stata_version)'"
+	// Add compressed values to hash
+	h0 = mod(h0 + a, 4294967296)
+	h1 = mod(h1 + b, 4294967296)
+	h2 = mod(h2 + c, 4294967296)
+	h3 = mod(h3 + d, 4294967296)
 
-	* Build JSON payload (matches local CSV columns exactly)
-	* Escape double quotes in command_string by replacing with single quotes
-	local command_escaped : subinstr local command_string `"""' "'", all
+	// Return 16-character hex string (first 64 bits of hash)
+	return(_rs_to_hex(h0) + _rs_to_hex(h1))
+}
 
-	local json_payload `"{"timestamp": "`timestamp'", "user_id": "`user_id'", "platform": "stata", "version": "`version'", "command_string": "`command_escaped'", "os": "`os'", "platform_version": "`platform_version'"}"'
+// Convert 32-bit integer to 8-character hex string
+string scalar _rs_to_hex(real scalar num)
+{
+	real scalar i, digit
+	string scalar hex, result
+	string vector hexchars
 
-	* Get API host (supports dev mode override via _rs_utils get_api_host)
-	* Suppress output to keep telemetry silent
-	qui _rs_utils get_api_host
-	local api_host "`r(host)'"
-	local api_endpoint "`api_host'/api/v1/telemetry"
+	hexchars = ("0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "a", "b", "c", "d", "e", "f")
+	result = ""
+	num = floor(num)
 
-	* Send to registream.org via curl (silent failure on error)
-	* Use temporary file for payload
-	tempfile payload_file
-	cap file close payloadfile
-	cap file open payloadfile using "`payload_file'", write replace text
-
-	if (_rc == 0) {
-		file write payloadfile `"`json_payload'"'
-		cap file close payloadfile
-
-		* Send POST request with curl (silent, timeout 5 seconds, fail gracefully)
-		* -s: silent mode, -S: show errors, --max-time: timeout, -f: fail on HTTP errors
-		cap shell curl -s -S -f --max-time 5 -X POST -H "Content-Type: application/json" -d @"`payload_file'" "`api_endpoint'" 2>&1 > /dev/null
-
-		* Clean up temp file
-		cap erase "`payload_file'"
+	// Convert to hex (8 digits)
+	for (i = 1; i <= 8; i++) {
+		digit = mod(num, 16)
+		result = hexchars[digit + 1] + result
+		num = floor(num / 16)
 	}
 
-	* Silent on all outcomes - no user feedback, no error messages
-	* Usage tracking should never interrupt the user's workflow
+	return(result)
+}
+
 end

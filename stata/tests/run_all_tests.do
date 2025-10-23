@@ -19,7 +19,10 @@
   11. dofiles/11_telemetry_config.do - Telemetry and config system
   12. dofiles/12_bug_fixes_validation.do - Bug fixes validation tests
   13. dofiles/13_version_resolution_priority.do - Version resolution (2-level: dev/production, 22 sub-tests)
-  14. dofiles/99_cleanup.do - Clean state restoration
+  14. dofiles/14_network_requests_timing.do - Network request timing and counting (5 sub-tests)
+  15. dofiles/15_timestamp_cache_test.do - Timestamp cache logic (numeric clock values)
+  16. dofiles/16_dataset_updates_test.do - Dataset update checks (native GET + numeric timestamps)
+  17. dofiles/99_cleanup.do - Clean state restoration
 
   Usage:
     From repo root: do stata/tests/run_all_tests.do
@@ -121,7 +124,7 @@ local tests_failed = 0
 
 * Test 1: Config Initialization
 di as result "============================================================"
-di as result "Test 1/14: Config Auto-Initialization"
+di as result "Test 1/17: Config Auto-Initialization"
 di as result "============================================================"
 local ++tests_total
 cap noi do "$TEST_DIR/dofiles/01_config_initialization.do"
@@ -136,7 +139,7 @@ else {
 
 * Test 2: Basic Workflow
 di as result "============================================================"
-di as result "Test 2/14: Basic Autolabel Workflow"
+di as result "Test 2/17: Basic Autolabel Workflow"
 di as result "============================================================"
 local ++tests_total
 cap noi do "$TEST_DIR/dofiles/02_basic_workflow.do"
@@ -151,7 +154,7 @@ else {
 
 * Test 3: Verification Scenarios
 di as result "============================================================"
-di as result "Test 3/14: File/Metadata Verification"
+di as result "Test 3/17: File/Metadata Verification"
 di as result "============================================================"
 local ++tests_total
 cap noi do "$TEST_DIR/dofiles/03_verification_scenarios.do"
@@ -166,7 +169,7 @@ else {
 
 * Test 4: Caching
 di as result "============================================================"
-di as result "Test 4/14: Last Checked Caching (24-hour)"
+di as result "Test 4/17: Last Checked Caching (24-hour)"
 di as result "============================================================"
 local ++tests_total
 cap noi do "$TEST_DIR/dofiles/04_caching.do"
@@ -181,7 +184,7 @@ else {
 
 * Test 5: Offline Mode
 di as result "============================================================"
-di as result "Test 5/14: Online vs Offline Validation"
+di as result "Test 5/17: Online vs Offline Validation"
 di as result "============================================================"
 local ++tests_total
 cap noi do "$TEST_DIR/dofiles/05_offline_mode.do"
@@ -196,7 +199,7 @@ else {
 
 * Test 6: Comprehensive Update System
 di as result "============================================================"
-di as result "Test 6/14: Version & Update System"
+di as result "Test 6/17: Version & Update System"
 di as result "============================================================"
 local ++tests_total
 cap noi do "$TEST_DIR/dofiles/06_comprehensive_update_system.do"
@@ -211,7 +214,7 @@ else {
 
 * Test 7: Update Default Behavior
 di as result "============================================================"
-di as result "Test 7/14: Update Default Behavior"
+di as result "Test 7/17: Update Default Behavior"
 di as result "============================================================"
 local ++tests_total
 cap noi do "$TEST_DIR/dofiles/07_update_default_behavior.do"
@@ -226,7 +229,7 @@ else {
 
 * Test 8: Version and Citation Commands
 di as result "============================================================"
-di as result "Test 8/14: Version & Citation Commands"
+di as result "Test 8/17: Version & Citation Commands"
 di as result "============================================================"
 local ++tests_total
 cap noi do "$TEST_DIR/dofiles/08_version_and_cite_commands.do"
@@ -241,7 +244,7 @@ else {
 
 * Test 9: Auto Update Check
 di as result "============================================================"
-di as result "Test 9/14: Auto Update Check"
+di as result "Test 9/17: Auto Update Check"
 di as result "============================================================"
 local ++tests_total
 cap noi do "$TEST_DIR/dofiles/09_auto_update_check.do"
@@ -256,7 +259,7 @@ else {
 
 * Test 10: Update Notification
 di as result "============================================================"
-di as result "Test 10/14: Update Notification (Update Available)"
+di as result "Test 10/17: Update Notification (Update Available)"
 di as result "============================================================"
 local ++tests_total
 cap noi do "$TEST_DIR/dofiles/10_update_notification.do"
@@ -271,7 +274,7 @@ else {
 
 * Test 11: Telemetry and Config System
 di as result "============================================================"
-di as result "Test 11/14: Telemetry and Config System"
+di as result "Test 11/17: Telemetry and Config System"
 di as result "============================================================"
 local ++tests_total
 cap noi do "$TEST_DIR/dofiles/11_telemetry_config.do"
@@ -286,7 +289,7 @@ else {
 
 * Test 12: Bug Fixes Validation
 di as result "============================================================"
-di as result "Test 12/14: Bug Fixes Validation"
+di as result "Test 12/17: Bug Fixes Validation"
 di as result "============================================================"
 local ++tests_total
 cap noi do "$TEST_DIR/dofiles/12_bug_fixes_validation.do"
@@ -301,7 +304,7 @@ else {
 
 * Test 13: Version Resolution Priority System
 di as result "============================================================"
-di as result "Test 13/14: Version Resolution Priority System"
+di as result "Test 13/17: Version Resolution Priority System"
 di as result "============================================================"
 local ++tests_total
 cap noi do "$TEST_DIR/dofiles/13_version_resolution_priority.do"
@@ -314,12 +317,12 @@ else {
 	di as error "[FAIL] Test 13 (rc=`=_rc')"
 }
 
-* Test 14: Cleanup
+* Test 14: Network Requests Timing
 di as result "============================================================"
-di as result "Test 14/14: Clean State Restoration"
+di as result "Test 14/17: Network Request Timing and Counting"
 di as result "============================================================"
 local ++tests_total
-cap noi do "$TEST_DIR/dofiles/99_cleanup.do"
+cap noi do "$TEST_DIR/dofiles/14_network_requests_timing.do"
 if (_rc == 0) {
 	local ++tests_passed
 	di as result "[PASS] Test 14"
@@ -327,6 +330,51 @@ if (_rc == 0) {
 else {
 	local ++tests_failed
 	di as error "[FAIL] Test 14 (rc=`=_rc')"
+}
+
+* Test 15: Timestamp Cache Logic
+di as result "============================================================"
+di as result "Test 15/17: Timestamp Cache Logic (Numeric Clock)"
+di as result "============================================================"
+local ++tests_total
+cap noi do "$TEST_DIR/dofiles/15_timestamp_cache_test.do"
+if (_rc == 0) {
+	local ++tests_passed
+	di as result "[PASS] Test 15"
+}
+else {
+	local ++tests_failed
+	di as error "[FAIL] Test 15 (rc=`=_rc')"
+}
+
+* Test 16: Dataset Update Checks
+di as result "============================================================"
+di as result "Test 16/17: Dataset Update Checks (Native GET)"
+di as result "============================================================"
+local ++tests_total
+cap noi do "$TEST_DIR/dofiles/16_dataset_updates_test.do"
+if (_rc == 0) {
+	local ++tests_passed
+	di as result "[PASS] Test 16"
+}
+else {
+	local ++tests_failed
+	di as error "[FAIL] Test 16 (rc=`=_rc')"
+}
+
+* Test 17: Cleanup
+di as result "============================================================"
+di as result "Test 17/17: Clean State Restoration"
+di as result "============================================================"
+local ++tests_total
+cap noi do "$TEST_DIR/dofiles/99_cleanup.do"
+if (_rc == 0) {
+	local ++tests_passed
+	di as result "[PASS] Test 17"
+}
+else {
+	local ++tests_failed
+	di as error "[FAIL] Test 17 (rc=`=_rc')"
 }
 
 *==============================================================================

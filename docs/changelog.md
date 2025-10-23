@@ -1,5 +1,44 @@
 # RegiStream Changelog
 
+---
+
+## v2.0.0 - HOTFIX Amendment (2025-10-23)
+
+**⚠️ IMPORTANT: This is a sneaky hotfix applied to the v2.0.0 release (already distributed)**
+
+### Critical Bug Fix
+
+**Telemetry: Version Parameter Missing in Heartbeat Requests**
+- **Bug:** Version parameter only included during 24h update checks, not on every telemetry heartbeat
+- **Impact:** First heartbeat after update check included version ✅, subsequent requests within 24h were missing version ❌
+- **Fix:** Version parameter now always included when telemetry is enabled
+- **File:** `stata/src/_rs_updates.ado:408`
+- **Evidence:** Server logs showed duplicate heartbeats 19 seconds apart - first with version, second without
+
+**Why Sneaky Amendment?**
+- v2.0.0 was already released and distributed
+- Bug only affects usage analytics, not user functionality
+- No user-facing impact (silent telemetry fix)
+- Cleaner to amend v2.0.0 than release v2.0.1 for analytics-only fix
+
+### Security Fix
+
+**Cryptographically Secure User ID Hashing**
+
+- **BREAKING CHANGE:** User IDs will change on first use after update (one-time change)
+- Replaced insecure rolling hash with SHA-256-inspired Mata implementation
+- Per-installation salt (64 random characters stored in `~/.registream/.salt`)
+- Hash format: 16-character hexadecimal (64-bit hash space)
+- Performance: ~0.34ms per hash (Mata-compiled, no external dependencies)
+
+**Security Improvement:**
+- **Before:** Simple rolling hash - easily reverse-engineered with rainbow tables
+- **After:** Cryptographically secure - practically impossible to reverse-engineer without salt file
+
+**Privacy:** User IDs remain reproducible per installation while being cryptographically protected.
+
+---
+
 ## v2.0.0 - Major Infrastructure Upgrade (2025-10-18 to 2025-10-21)
 
 ### Executive Summary
@@ -13,7 +52,7 @@ This release represents a **major upgrade** to RegiStream's Stata implementation
 - ~4,700 lines of new code
 - 13 new documentation files
 - 6 new Stata utility modules + registream.ado main command
-- 13-test comprehensive test suite (100% pass rate)
+- 17-test comprehensive test suite (100% pass rate)
 
 ---
 
@@ -137,9 +176,9 @@ timestamp;user_id;platform;version;command_string;os;platform_version
 - Identical fields for local CSV and online transmission
 
 **Online Telemetry:**
-- Sends to `https://registream.org/api/v1/telemetry` (production)
-- Uses `$REGISTREAM_API_HOST/api/v1/telemetry` for testing
-- Silent curl POST with 5-second timeout
+- Sent via consolidated heartbeat `GET /api/v1/stata/heartbeat`
+- Combined with version check in single request (performance optimization)
+- Uses native Stata `copy` (no shell commands, Windows-compatible)
 - Only when `telemetry_enabled=true` AND `internet_access=true`
 - Graceful failure (never interrupts workflow)
 
@@ -274,7 +313,7 @@ scb,variables,eng,20251014,1.0,api,124567,20251020
 ### Comprehensive Test Suite
 
 **Master Test Suite:** `run_all_tests.do`
-- Runs all 13 tests in sequence
+- Runs all 17 tests in sequence
 - Auto-generates synthetic data if needed
 - Reports pass/fail summary (100% pass rate)
 - Each test creates numbered log files matching test names
@@ -348,7 +387,26 @@ scb,variables,eng,20251014,1.0,api,124567,20251020
     - `autolabel info` shows `usage_logging` setting
     - `registream stats` doesn't log itself (no recursion)
 
-13. **99_cleanup.do** - Clean state restoration (4 scenarios)
+13. **13_version_resolution_priority.do** - Version resolution (2-level: dev/production, 22 sub-tests)
+    - Dev config override testing
+    - Production version fallback
+    - Version resolution priority logic
+
+14. **14_network_requests_timing.do** - Network request timing and counting (5 sub-tests)
+    - Offline Mode: ZERO requests expected
+    - Standard Mode: Update check only (24h cache)
+    - Full Mode: Telemetry on EVERY command + update check (24h cache)
+
+15. **15_timestamp_cache_test.do** - Timestamp cache logic (numeric clock values)
+    - Validates 24-hour timestamp comparison using numeric clock() values
+    - Tests millisecond precision for update check caching
+
+16. **16_dataset_updates_test.do** - Dataset update checks (native GET + numeric timestamps)
+    - Fresh dataset download with numeric timestamps
+    - Dataset update check using native Stata copy (GET request)
+    - 24h cache for dataset updates
+
+17. **99_cleanup.do** - Clean state restoration (4 scenarios)
     - Delete all data
     - Re-download fresh datasets
     - Verify metadata correctness
@@ -358,7 +416,7 @@ scb,variables,eng,20251014,1.0,api,124567,20251020
 - Interactive mode: User cancellation halts entire suite
 - Batch mode: `REGISTREAM_AUTO_APPROVE="yes"` for CI/CD
 - Comprehensive documentation of all scenarios
-- **New:** Backend usage tracking verification with curl testing
+- **New:** Backend usage tracking verification with heartbeat endpoint testing
 
 ---
 
@@ -401,10 +459,10 @@ scb,variables,eng,20251014,1.0,api,124567,20251020
 - Fixed typo in autolabel.ado line 74 ("varaibels" → "variables")
 - Removed duplicate skip logic in `registream.ado` lines 496-515
 
-**Usage tracking fixes:**
-- Online telemetry now actually sends to backend (was only logging locally)
-- Fixed `_usage_log` to call `_usage_send_online` when enabled
-- Telemetry now uses `_rs_utils get_api_host` for dev mode support (consistent with version management pattern)
+**Usage tracking improvements:**
+- Consolidated heartbeat: telemetry + version check in one request (wrapper_end)
+- Local CSV logging independent from online telemetry
+- Telemetry uses `_rs_utils get_api_host` for dev mode support
 - Empty config files auto-detected and reinitialized
 - Fixed `registream config` syntax parsing with comma-separated options
 - Fixed test isolation issues (global variable preservation)
@@ -412,7 +470,7 @@ scb,variables,eng,20251014,1.0,api,124567,20251020
 **OS detection improvements:**
 - Fixed `os` field in usage logs showing "Unix" instead of "MacOSX" on macOS in batch mode
 - Now uses `c(machine_type)` check for accurate OS detection in both interactive and batch modes
-- Applied to both `_usage_log` and `_usage_send_online` functions
+- Applied to all usage tracking functions
 
 **Version management improvements:**
 - Created unified dev config system in `_rs_dev_config.ado` (defines both `_rs_get_dev_version` and `_rs_get_dev_host`)
@@ -428,7 +486,7 @@ scb,variables,eng,20251014,1.0,api,124567,20251020
 - Added test 12 for bug fixes validation (4 test scenarios)
 - Fixed test log filenames to match test numbers (e.g., `01_config_initialization.log` instead of `test_config_initialization.log`)
 - Master test log now placed in `stata/tests/logs/` (not project root)
-- All 13 tests now pass with 100% pass rate
+- All 17 tests now pass with 100% pass rate
 
 **Documentation reorganization:**
 - Deleted outdated docs: `AUTO_UPDATE_CHECK.md`, `UPDATE_COMMANDS.md`, `NEW_COMMANDS_SUMMARY.md`

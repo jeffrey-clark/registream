@@ -43,32 +43,32 @@ program define registream
 
 	if ("`subcmd'" == "update") {
 		_registream_update `rest'
-		_registream_wrapper_end "`REGISTREAM_VERSION'"
+		_registream_wrapper_end "`REGISTREAM_VERSION'" "`registream_dir'" "`0'"
 		exit 0
 	}
 	else if ("`subcmd'" == "info") {
 		_registream_info `rest'
-		_registream_wrapper_end "`REGISTREAM_VERSION'"
+		_registream_wrapper_end "`REGISTREAM_VERSION'" "`registream_dir'" "`0'"
 		exit 0
 	}
 	else if ("`subcmd'" == "config") {
 		_registream_config `rest'
-		_registream_wrapper_end "`REGISTREAM_VERSION'"
+		_registream_wrapper_end "`REGISTREAM_VERSION'" "`registream_dir'" "`0'"
 		exit 0
 	}
 	else if ("`subcmd'" == "version") {
 		_registream_version `rest'
-		_registream_wrapper_end "`REGISTREAM_VERSION'"
+		_registream_wrapper_end "`REGISTREAM_VERSION'" "`registream_dir'" "`0'"
 		exit 0
 	}
 	else if ("`subcmd'" == "cite") {
 		_registream_cite `rest'
-		_registream_wrapper_end "`REGISTREAM_VERSION'"
+		_registream_wrapper_end "`REGISTREAM_VERSION'" "`registream_dir'" "`0'"
 		exit 0
 	}
 	else if ("`subcmd'" == "stats") {
 		_registream_stats `rest'
-		_registream_wrapper_end "`REGISTREAM_VERSION'"
+		_registream_wrapper_end "`REGISTREAM_VERSION'" "`registream_dir'" "`0'"
 		exit 0
 	}
 	else if ("`subcmd'" == "") {
@@ -83,14 +83,14 @@ program define registream
 		di as text "  {cmd:registream stats} [all]                       - Show usage statistics"
 		di as text ""
 		di as text "See {help registream:help registream} for details"
-		_registream_wrapper_end "`REGISTREAM_VERSION'"
+		_registream_wrapper_end "`REGISTREAM_VERSION'" "`registream_dir'" "`0'"
 		exit 198
 	}
 	else {
 		di as error "Unknown subcommand: `subcmd'"
 		di as text "Available: update, info, config, version, cite, stats"
 		di as text "See {help registream:help registream} for details"
-		_registream_wrapper_end "`REGISTREAM_VERSION'"
+		_registream_wrapper_end "`REGISTREAM_VERSION'" "`registream_dir'" "`0'"
 		exit 198
 	}
 end
@@ -108,6 +108,10 @@ program define _registream_update
 	* Parse arguments: [package|dataset|datasets] [, domain() lang()]
 	syntax [anything] [, DOMAIN(string) LANG(string)]
 	local what "`anything'"
+
+	* Normalize domain and lang to lowercase immediately (case-insensitive)
+	if ("`domain'" != "") local domain = lower("`domain'")
+	if ("`lang'" != "") local lang = lower("`lang'")
 
 	* Get registream directory
 	_rs_utils get_dir
@@ -493,35 +497,56 @@ program define _registream_wrapper_start, rclass
 	* Parse command for conditional logic
 	local first_word : word 1 of `command_line'
 
-	* Log usage (skip "stats" to avoid recursion)
+	* Log local usage (fast, synchronous) - skip "stats" to avoid recursion
 	if ("`first_word'" != "stats") {
-		* Local usage logging
 		_rs_config get "`registream_dir'" "usage_logging"
 		if (r(value) == "true" | r(value) == "1") {
 			_rs_usage init "`registream_dir'"
 			_rs_usage log "`registream_dir'" "registream `command_line'" "`current_version'"
 		}
-
-		* Online telemetry (if enabled and internet available)
-		_rs_config get "`registream_dir'" "telemetry_enabled"
-		local telemetry_enabled = r(value)
-		_rs_config get "`registream_dir'" "internet_access"
-		local internet_access = r(value)
-
-		if (("`telemetry_enabled'" == "true" | "`telemetry_enabled'" == "1") & ("`internet_access'" == "true" | "`internet_access'" == "1")) {
-			cap qui _rs_usage send_online "`registream_dir'" "registream `command_line'" "`current_version'"
-		}
 	}
 
-	* Run background update check (skip "update" to avoid duplicate checks)
-	if ("`first_word'" != "update") {
-		cap qui _rs_updates check_background "`registream_dir'" "`current_version'"
-	}
+	* NOTE: Telemetry and update check moved to wrapper_end for consolidated heartbeat
+	* This ensures instant startup with no blocking on network operations
 end
 
-* Wrapper end: Show update notification
+* Wrapper end: Consolidated heartbeat (telemetry + update check) + notification
 program define _registream_wrapper_end
-	args current_version
+	args current_version registream_dir command_line
+
+	* Get registream directory if not provided
+	if ("`registream_dir'" == "") {
+		_rs_utils get_dir
+		local registream_dir "`r(dir)'"
+	}
+
+	* Parse command for conditional logic
+	if ("`command_line'" != "") {
+		gettoken first_word rest : command_line, parse(" ,")
+	}
+
+	* Check if we should send heartbeat (telemetry OR update check enabled)
+	_rs_config get "`registream_dir'" "telemetry_enabled"
+	local telemetry_enabled = r(value)
+	_rs_config get "`registream_dir'" "internet_access"
+	local internet_access = r(value)
+	_rs_config get "`registream_dir'" "auto_update_check"
+	local auto_update_enabled = r(value)
+
+	* Default to true if not found
+	if ("`auto_update_enabled'" == "") local auto_update_enabled "true"
+
+	* Send heartbeat if: (telemetry OR update_check) AND internet AND not "update"/"stats"/"config" command
+	local should_heartbeat = 0
+	if (("`telemetry_enabled'" == "true" | "`telemetry_enabled'" == "1" | "`auto_update_enabled'" == "true" | "`auto_update_enabled'" == "1") & ("`internet_access'" == "true" | "`internet_access'" == "1") & "`first_word'" != "update" & "`first_word'" != "stats" & "`first_word'" != "config") {
+		local should_heartbeat = 1
+	}
+
+	if (`should_heartbeat' == 1) {
+		* Consolidated heartbeat: telemetry + update check in one request
+		* Uses native Stata copy - ZERO shell commands, ZERO flashes
+		cap qui _rs_updates send_heartbeat "`registream_dir'" "`current_version'" "registream `command_line'"
+	}
 
 	* Show update notification if available
 	_rs_updates show_notification "`current_version'"

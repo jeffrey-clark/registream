@@ -62,7 +62,7 @@ global REGISTREAM_AUTO_APPROVE "yes"
 
 * Clear all cached programs and load fresh
 discard
-adopath + "$SRC_DIR"
+adopath ++ "$SRC_DIR"
 do "$SRC_DIR/_rs_utils.ado"
 cap do "$SRC_DIR/_rs_dev_utils.ado"
 

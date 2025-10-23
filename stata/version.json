@@ -10,7 +10,8 @@
       "highlights": [
         "New registream command with subcommands (info, config, update, stats, version, cite)",
         "API v1 migration with RESTful endpoints (/api/v1/datasets/{domain}/{type}/{lang}/{version})",
-        "Schema 1.0 support with improved column names and validation",
+        "Schema 1.0 support with improved column names (variable → variable_name) and validation",
+        "Case-insensitive domain and language parameters (automatically normalized to lowercase)",
         "Three-mode configuration system (Offline/Standard/Full) with first-run setup",
         "Usage tracking with local logging and optional anonymous telemetry",
         "Automatic update check with 24-hour caching and persistent notifications",
@@ -18,18 +19,20 @@
         "Intelligent user prompts with version choice options",
         "Development mode infrastructure with clean function-based overrides",
         "Comprehensive test suite with 14 test files (100% pass rate)",
-        "Complete documentation overhaul (14 new documentation files)",
-        "6 new Stata utility modules for modular architecture"
+        "6 new Stata utility modules for modular architecture (_rs_config, _rs_usage, _rs_updates, etc.)",
+        "Complete documentation overhaul (14 new documentation files)"
       ],
       "breaking_changes": [
-        "v2.0.0 requires Schema 1.0 datasets - users must re-download all datasets (column renamed: variable → variable_name)",
+        "Schema 1.0 required - users must re-download all datasets (column renamed: variable → variable_name)",
         "v1.0.1 users can continue using v1.0.1 with Schema 0.5 datasets and legacy API routes"
       ],
-      "bug_fixes": [
-        "Fixed escape_ascii return local syntax",
-        "Error messages no longer suppressed during execution",
-        "registream stats no longer logs itself (prevents recursion)",
-        "autolabel info now shows usage_logging setting correctly"
+      "new_features": [
+        "Case-insensitive domain/language parameters (auto-normalized to lowercase)",
+        "registream command suite (replaces scattered functionality)",
+        "First-run interactive configuration setup with three modes",
+        "Version choice prompts when datasets are missing",
+        "Metadata tracking system (datasets.csv)",
+        "Schema validation with clear error messages"
       ],
       "github_release": "https://github.com/jeffrey-clark/registream/releases/tag/v2.0.0-stata"
     },

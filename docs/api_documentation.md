@@ -261,6 +261,56 @@ X-Updates-Available: 1
 
 ---
 
+#### Check Updates (Bulk) - GET Format ⭐ NEW
+
+```
+GET /api/v1/datasets/check_updates?datasets={dataset_list}
+```
+
+**Purpose:** Check for updates via URL parameters (simpler, cacheable, optimized for Stata)
+
+**Parameter Format:**
+- Multiple datasets: `domain;type;lang;version|domain;type;lang;version`
+- Pipe (`|`) separates datasets
+- Semicolon (`;`) separates fields within each dataset
+
+**Returns:** CSV format (always)
+
+**Example:**
+```bash
+curl "https://registream.org/api/v1/datasets/check_updates?datasets=scb;variables;eng;20251014|scb;value_labels;eng;unknown"
+```
+
+**Response (CSV):**
+```csv
+domain,type,lang,current_version,latest_version,update_available,available_for_download,message
+scb,variables,eng,20251014,20251014,0,1,Already on latest version.
+scb,value_labels,eng,unknown,20251014,1,1,Dataset found with version 20251014. Re-download to get proper metadata.
+```
+
+**Stata Example:**
+```stata
+* Build URL with datasets
+local datasets "scb;variables;eng;20251014|scb;value_labels;eng;20251014"
+local url "https://registream.org/api/v1/datasets/check_updates?datasets=`datasets'"
+
+* Single GET request - no POST body needed!
+tempfile resp
+copy "`url'" "`resp'", replace
+
+* Import and check
+import delimited using "`resp'", clear
+list if update_available == 1
+```
+
+**Benefits:**
+- ⚡ Simpler than POST (no request body)
+- 🔄 Cacheable (GET requests)
+- 📝 Easier to construct in Stata
+- 🚀 Better performance
+
+---
+
 ### Version Management
 
 #### Get Versions Manifest
@@ -299,52 +349,157 @@ GET /api/v1/versions/{domain}/latest
 
 ---
 
+### Stata Package Heartbeat ⭐ NEW
+
+```
+GET /api/v1/stata/heartbeat
+```
+
+**Purpose:** Consolidated telemetry + update check in a single request (performance optimization)
+
+**Combines:**
+- Telemetry logging (silent)
+- Package version checking
+
+**Query Parameters:**
+- `version` - Current Stata package version (e.g., "2.0.0") - **REQUIRED** (always included in v2.0.0+)
+- `user_id` - Anonymous user identifier (optional, only when telemetry enabled)
+- `command` - Command executed (e.g., "autolabel lookup scb", "registream update") (optional, only when telemetry enabled)
+- `platform` - Platform name (default: "stata") (optional, only when telemetry enabled)
+- `os` - Operating system (MacOSX, Windows, Unix) (optional, only when telemetry enabled)
+- `platform_version` - Stata version (e.g., "18.0") (optional, only when telemetry enabled)
+- `timestamp` - ISO timestamp (optional, only when telemetry enabled)
+
+**Returns:** JSON with version update information
+
+**Example:**
+```bash
+curl "https://registream.org/api/v1/stata/heartbeat?version=2.0.0&user_id=abc123&command=autolabel%20lookup%20scb&os=MacOSX&platform_version=18.0&timestamp=2025-10-23T12:00:00Z"
+```
+
+**Response:**
+```json
+{
+  "status": "ok",
+  "update_available": true,
+  "latest_version": "2.0.1",
+  "current_version": "2.0.0"
+}
+```
+
+**Features:**
+- ⚡ Single HTTP request instead of two separate calls
+- 🔇 Telemetry logging is silent (never breaks the response)
+- 📊 Records usage analytics in MongoDB
+- ⚙️ Works with minimal parameters (graceful degradation)
+
+**Used By:** Stata package v2.0.0+ for efficient update checking
+
+**Replaces:** Dual calls to `POST /api/v1/telemetry` + `GET /api/v1/stata/version`
+
+**Stata Example:**
+```stata
+* Single request for telemetry + version check
+local url "https://registream.org/api/v1/stata/heartbeat"
+local params "version=2.0.0&user_id=`user_id'&command=check&os=`os'&platform_version=`c(stata_version)'&timestamp=`timestamp'"
+
+tempfile resp
+copy "`url'?`params'" "`resp'", replace
+
+* Parse response for update_available
+file open fh using "`resp'", read
+file read fh json_response
+file close fh
+```
+
+**Important Notes:**
+- `version` parameter is **REQUIRED** and always included in v2.0.0+ (fixed in v2.0.0 hotfix)
+- Other parameters only sent when telemetry is enabled (`telemetry_enabled=true`)
+- Update checks cached for 24 hours (uses `last_update_check` timestamp)
+- Telemetry sent on every command (no caching)
+
+---
+
 ### Telemetry
+
+#### Log Telemetry Event
 
 ```
 POST /api/v1/telemetry
-Content-Type: application/json
 ```
 
-**Purpose:** Receive anonymized usage data from RegiStream clients (opt-in only).
+**Purpose:** Log usage analytics from RegiStream packages (all platforms)
+
+**Content-Type:** `application/json`
 
 **Request Body:**
 ```json
 {
-  "timestamp": "2025-10-20T17:38:19Z",
+  "timestamp": "20 Oct 2025 17:38:19Z",
   "user_id": "1234567890",
   "platform": "stata",
   "version": "2.0.0",
   "command_string": "autolabel variables kon, domain(scb) lang(eng)",
   "os": "MacOSX",
-  "platform_version": "16.0"
+  "platform_version": "18.0"
 }
 ```
 
-**Fields:**
-- `timestamp` - ISO 8601 timestamp
-- `user_id` - Anonymous 10-digit hash (consistent per user+machine)
-- `platform` - Client language ("stata", "python", "r")
-- `version` - RegiStream version
-- `command_string` - Full command with arguments
-- `os` - Operating system
-- `platform_version` - Language version
+**Required Fields:**
+- `timestamp` - Client timestamp (ISO or custom format)
+- `user_id` - Anonymous user identifier
+- `platform` - Platform name (`stata`, `python`, `r`)
+- `version` - Package version
+- `command_string` - Command executed
+- `os` - Operating system (`MacOSX`, `Windows`, `Unix`)
+- `platform_version` - Platform version (e.g., Stata version, Python version)
 
-**Response:**
+**Response (Success):**
 ```json
 {
-  "status": "success"
+  "status": "ok"
 }
 ```
 
-**Privacy:**
-- Only sent when user opts in (Full Mode)
-- No dataset content or file paths
-- User ID is a one-way hash
-- GDPR-compliant
-- Controlled via `registream config, telemetry_enabled(true/false)`
+**Response (Error):**
+```json
+{
+  "status": "error",
+  "message": "Missing required fields: user_id, version"
+}
+```
 
-**Implementation:** Silent operation with 5-second timeout, graceful failure, no user interruption.
+**Server-side Additions:**
+- `server_timestamp` - When server received the event
+- `user_agent` - HTTP User-Agent header
+- `ip_address` - Client IP address
+
+**Storage:** MongoDB `telemetry` collection
+
+**Error Handling:** Returns 200 OK even on errors (telemetry failures should be silent)
+
+**Used By:**
+- Stata package (via `/stata/heartbeat` in v2.0.0+)
+- Python package (direct POST)
+- R package (future)
+- Web analytics dashboards
+
+**Python Example:**
+```python
+import requests
+
+requests.post('https://registream.org/api/v1/telemetry', json={
+    'timestamp': '2025-10-23T12:00:00Z',
+    'user_id': 'user123',
+    'platform': 'python',
+    'version': '1.0.0',
+    'command_string': 'load_dataset("scb", "variables")',
+    'os': 'Unix',
+    'platform_version': '3.11.0'
+})
+```
+
+**Note:** For Stata package v2.0.0+, use `/api/v1/stata/heartbeat` instead for better performance (combines telemetry + version check).
 
 ---
 
