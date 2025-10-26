@@ -1,0 +1,59 @@
+Dear Editors of the Stata Journal,
+
+We are pleased to submit our manuscript titled "autolabel: Automating
+variable and value labeling in Stata" for consideration for publication in
+The Stata Journal.
+
+This paper introduces autolabel, a Stata command that automates variable
+and value labeling from centralized, multilingual metadata repositories. The
+command operates at institutional scale, enabling organizations to
+programmatically compile metadata from their documentation systems into
+standardized CSV repositories. This transforms metadata from per-dataset
+documentation into shared infrastructure for reproducible research.
+
+The paper makes three contributions:
+
+1. Technical contribution: A deferred execution pattern using temporary
+   do-files inside preserved sessions to safely separate dataset inspection
+   from transformation, enabling inspection-based command generation.
+
+2. Architectural contribution: A domain-agnostic CSV-based metadata schema
+   that operates at institutional scale. Organizations can programmatically
+   export metadata from their systems into standardized repositories,
+   treating metadata as infrastructure rather than per-project documentation.
+
+3. Practical contribution: Demonstration that scalability enables
+   methodological benefits (reproducibility, auditability, automation) to
+   extend from individual projects to organizational and cross-national
+   research infrastructure. Multilingual metadata enables instant language
+   switching without modifying datasets.
+
+The autolabel command has been available in production use at Statistics
+Sweden since October 2024 and has been adopted by research groups at several
+major Swedish universities.
+
+The submission includes the complete manuscript, source code, reproducible
+examples, and synthetic datasets. All examples can be reproduced offline
+using the included files.
+
+We confirm that this manuscript is not currently under review by another
+journal and that we will not submit it elsewhere before receiving a decision
+from The Stata Journal. All authors have approved this submission.
+
+We believe this tool will be of interest to Stata users working with
+administrative and registry data across disciplines, particularly those
+requiring metadata infrastructure at institutional or cross-national scale.
+
+Thank you for considering our submission.
+
+Sincerely,
+
+Jeffrey Clark
+PhD Student, Economics
+Stockholm University
+jeffrey.clark@su.se
+
+Jie Wen
+PhD Student, Business Administration
+Stockholm School of Economics
+jie.wen@hhs.se

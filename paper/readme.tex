@@ -1,0 +1,33 @@
+% readme.tex -- RegiStream article insert for the Stata Journal
+
+\inserttype[st0687]{article}  % Choose a unique code later, placeholder here
+
+\author{Jeffrey Clark and Jie Wen}{%
+  Jeffrey Clark\\Stockholm University\\Stockholm, Sweden\\jeffrey.clark@su.se
+  \and
+  Jie Wen\\Stockholm School of Economics\\Stockholm, Sweden\\jie.wen@hhs.se
+}
+
+\title[autolabel]{autolabel: Automating variable and value labeling in Stata}
+\maketitle
+
+\begin{abstract}
+Register-based datasets from national statistical agencies arrive with cryptic variable names and unlabeled coded values, requiring researchers to manually extract and apply metadata from external documentation. This tedious, error-prone process hinders reproducibility. The \texttt{autolabel} command automates variable and value labeling by matching dataset variables to centralized, multilingual CSV metadata repositories. The command introduces a \emph{deferred execution pattern} using temporary do-files inside preserved sessions to safely separate dataset inspection from transformation. The domain-agnostic design operates at institutional scale, enabling organizations to programmatically compile metadata from their systems into standardized CSV repositories. Multilingual metadata enables instant language switching without modifying datasets, transforming manual labeling workflows into automated, reproducible processes operating at organizational and cross-national scale.
+\keywords{autolabel, metadata automation, administrative data, reproducible research, multilingual metadata, deferred execution, Stata command}
+\end{abstract}
+
+% Article body (can be split into sections here or input separate .tex files)
+\input autolabel.tex  % Currently placeholder content
+\newpage
+\bibliographystyle{sj}
+\bibliography{autolabel}
+
+\begin{aboutauthors}
+Jeffrey Clark is a PhD student in Economics at Stockholm University. He led the development of autolabel and maintains the broader RegiStream project, which provides open tools for register data and metadata infrastructure. His research focuses on development, political, and labor economics.
+
+Jie Wen is a PhD student in Business Administration at Stockholm School of Economics. He co-founded the RegiStream project and co-developed autolabel. With a background in actuarial science, his research interests lie in accounting, auditing, and the use of microdata in empirical analysis.
+
+\end{aboutauthors}
+
+\endinput
+

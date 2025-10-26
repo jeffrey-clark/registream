@@ -1,31 +1,23 @@
+# macOS system files
 .DS_Store
 
-# Python
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
+# LaTeX build artifacts
+*.aux
+*.bbl
+*.blg
+*.log
+*.out
+*.pp1
+*.tag
 
-# Exports
-exports/*
-*.dta
-
-# Config files with tokens
-python/config/*
-python/dist/*
-python/build/*
-python/src/registream.egg-info/*
-
-stata_journal_submission/*
-paper/*
-stata_journal_submission_notes/*
+# Stata temporary files
+*.smcl
 
 # Development configuration (never commit)
-# These files can contain API host overrides and batch mode settings
-stata/src/_rs_dev_utils.ado
 _rs_dev_utils.ado
-# Test outputs (git-ignored, but keep test scripts)
-stata/tests/data/*.dta
-stata/tests/logs/*.log
-stata/tests/logs/*.smcl
 
+# Claude Code local settings
+.claude/settings.local.json
+
+submission_packages/*
+data/*

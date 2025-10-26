@@ -1,0 +1,438 @@
+\section{Introduction}
+
+Register-based datasets are essential to empirical research in economics, sociology, public health, and beyond. National statistical agencies routinely collect rich administrative data covering large populations over time, enabling powerful longitudinal and cross-sectional analyses unavailable with survey data. Yet these datasets often arrive in a form that is technically complete but practically inconvenient. Variables lack descriptive labels, coded values remain cryptic, and researchers must manually cross-reference external documentation to understand their data.
+
+The issue is not the lack of metadata. National statistical agencies provide extensive documentation through publicly available registries, including codebooks, variable descriptions, and value label definitions. Rather, the challenge lies in the disconnect between that documentation and the raw datasets themselves. Variables arrive cryptically coded; value codes remain unlabeled. For register datasets with hundreds of variables, researchers must manually extract metadata from external files, match them to dataset variables, and write labeling commands. This manual process is time-consuming and prone to inconsistencies and errors.
+
+This challenge extends beyond individual projects: metadata typically remains available only in the national language, limiting international collaboration. Automated, multilingual metadata application addresses this barrier directly.
+
+In this paper, we introduce \texttt{autolabel}, a Stata command that automates the application of variable and value labels from centralized metadata repositories. Developed within the RegiStream project \citep{registream2024}, \texttt{autolabel} eliminates manual labeling by applying standardized metadata through a single command. For researchers working with administrative microdata, this automation reduces interpretation errors, accelerates exploration, and enables international collaboration through multilingual metadata support.
+
+The command makes three core contributions:
+
+\textbf{Technical pattern:} To safely apply metadata when inspection requires destructive dataset operations, \texttt{autolabel} introduces a \emph{deferred execution pattern}: using temporary do-files inside preserved sessions to separate inspection logic from application logic. This pattern generalizes beyond labeling to any workflow requiring post-inspection transformations.
+
+\textbf{Extensibility:} The domain-agnostic design allows organizations to define custom domains following the documented metadata schema.
+
+\textbf{Multilingual support:} External metadata enables instant language switching across entire projects without dataset modification, facilitating international collaboration and multilingual reporting.
+
+The remainder of this article is organized as follows. Section~2 positions \texttt{autolabel} within existing metadata tools and discusses related work. Section~3 introduces command syntax and features. Section~4 presents the deferred execution implementation pattern. Section~5 demonstrates applied examples using register data. Section~6 describes the metadata file structure and domain specification. Section~7 concludes with discussion of contributions and future extensions.
+
+
+
+
+\section{Background and Related Work}
+
+\subsection{The metadata application gap}
+
+National statistical agencies provide high-quality register data with extensive documentation through publicly available metadata registries. This metadata includes codebooks, variable descriptions, and value label mappings, often available in structured formats (CSV, XML). However, documentation remains distributed separately from datasets, which are delivered without variable or value labels.
+
+While Stata provides robust labeling commands (\texttt{label variable}, \texttt{label define}, \texttt{label values}), applying metadata requires researchers to manually extract information from external files, match entries to dataset variables, and write labeling code. For large register datasets with hundreds of variables (many using complex classification schemes for industries, occupations, education levels, or geographic units), this manual process becomes time-consuming and error-prone. Subtle labeling inconsistencies across research projects impede reproducibility, particularly in collaborative settings where multiple researchers work with the same data sources.
+
+\subsection{Existing approaches to metadata management}
+
+Several Stata commands address metadata manipulation and documentation. \citet{klein2019elabel} introduced \texttt{elabel} for enhanced manipulation of existing labels within datasets. \citet{weesie2005multilingual} developed \texttt{mlanguage} for managing multilingual labels within datasets, requiring all translations to be embedded in the data file itself.
+
+More recently, Igl\'{e}sias et al.\ (2025) developed \texttt{metaxl}, which extracts metadata from datasets to Excel files, enabling harmonization across data extractions through Excel-based editing workflows. This approach is particularly valuable for managing longitudinal administrative data where variable definitions evolve over time, allowing researchers to identify inconsistencies, merge redundant value labels, and reapply harmonized metadata. \texttt{metaxl} addresses a different challenge than \texttt{autolabel}: building and harmonizing metadata for specific datasets rather than applying pre-existing metadata from centralized repositories.
+
+Table~\ref{tab:comparison} summarizes how \texttt{autolabel} complements existing Stata metadata tools.
+
+\begin{table}[htbp]
+\centering
+\caption{Comparison of Stata metadata management tools}
+\label{tab:comparison}
+\small
+\begin{tabular}{lp{3.5cm}p{3cm}p{3.5cm}}
+\hline
+\textbf{Feature} & \textbf{autolabel} & \textbf{metaxl} & \textbf{elabel/mlanguage} \\
+\hline
+Primary goal & Apply labels from external metadata repositories & Extract, audit, and harmonize metadata across datasets & Manipulate or refine existing labels within a dataset \\[0.3em]
+Source of truth & External CSV repositories (outside .dta) & Excel metafiles linked to datasets & Dataset-embedded label definitions \\[0.3em]
+Scale & Institutional/organizational (thousands of variables) & Project-level (specific datasets) & Dataset-level (existing labels) \\[0.3em]
+Multilingual & Yes (lang() switching) & Single language & mlanguage: embedded translations \\[0.3em]
+Safety pattern & \texttt{preserve} $\to$ write temp do $\to$ \texttt{restore} $\to$ execute & Standard in-memory operations (auto-backup file) & In-place modification \\[0.3em]
+Typical use case & Applying standardized register metadata from statistical agencies at scale & Harmonizing longitudinal or multi-wave survey extracts & Label editing and translation refinement \\
+\hline
+\end{tabular}
+\end{table}
+
+\noindent Each tool occupies a distinct role in the metadata workflow. \texttt{metaxl} emphasizes extraction and harmonization across datasets using Excel metafiles; \texttt{autolabel} automates deterministic application of external CSV-based metadata; \texttt{elabel} and \texttt{mlanguage} handle label editing and translations within a dataset. The approaches are complementary rather than overlapping.
+
+\subsection{What makes autolabel different}
+
+\texttt{autolabel} is, to our knowledge, the first Stata command to fully automate label application directly from external metadata repositories. Unlike tools that manipulate existing labels within datasets (\citet{klein2019elabel}, \citet{weesie2005multilingual}) or extract metadata for harmonization (\citet{iglesias2025metaxl}), \texttt{autolabel} applies centrally-maintained metadata to any dataset containing matching variables. Unlike \texttt{mlanguage} (which embeds translations within .dta files) or \texttt{metaxl} (which uses Excel as an intermediary), \texttt{autolabel} treats CSV repositories external to datasets as the source of truth. This separation ensures metadata remains version-controlled, auditable, and reusable across projects without modifying data files.
+
+\texttt{metaxl} helps researchers build and harmonize metadata for specific datasets through Excel-based workflows, valuable when variable definitions evolve over time or across institutional extractions. \texttt{autolabel} applies pre-existing metadata from centralized repositories, serving a complementary role. Where \texttt{metaxl} focuses on metadata harmonization, \texttt{autolabel} focuses on metadata application.
+
+The command assumes standardized variable naming and structured metadata, appropriate for register data from national statistical agencies. It is designed for metadata application at organizational scale, not data cleaning or variable harmonization; those tasks belong earlier in the workflow.
+
+This approach aligns with FAIR principles for research data \citep{wilkinson2016fair}: centralized repositories make metadata Findable, multilingual support makes it Accessible, standardized schemas ensure Interoperability, and domain-agnostic design enables Reusability.
+
+
+
+
+\section{The \texttt{autolabel} Command}
+
+\texttt{autolabel} automates the application of variable and value labels to register-based datasets, building directly on Stata's built-in labeling system. The command supports three modes: \texttt{variables}, \texttt{values}, and \texttt{lookup}.
+
+\subsection{Command structure}
+
+The general syntax for \texttt{autolabel} is as follows:
+
+\begin{verbatim}
+autolabel variables [varlist], domain(string) lang(string)
+    [exclude(varlist) suffix(string)]
+
+autolabel values [varlist], domain(string) lang(string)
+    [exclude(varlist) suffix(string)]
+
+autolabel lookup varlist, domain(string) lang(string)
+\end{verbatim}
+
+The \texttt{domain()} and \texttt{lang()} options are required; the command returns an error if either is omitted. The command is designed to work with any domain; users can create custom domains following the documented structure (Section~6). Metadata repositories can be hosted centrally or locally. The RegiStream project \citep{registream2024} maintains a public repository including the Statistics Sweden (SCB) domain. The full SCB domain contains nearly 28,000 variable entries covering Swedish administrative registers and provides language options \texttt{swe} (Swedish) and \texttt{eng} (English). For demonstration purposes, this submission includes a representative 10-variable subset. If missing metadata files are requested, \texttt{autolabel} prompts users to download them from the RegiStream repository.
+
+\subsection{Modes of operation}
+
+The command supports three modes, each requiring both \texttt{domain()} and \texttt{lang()} options. The \texttt{variables} mode applies variable labels to specified variables in the current dataset. The \texttt{values} mode applies value labels to categorical variables. The \texttt{lookup} mode displays metadata without modifying the dataset, showing available variable labels, value label definitions, and descriptions.
+
+If no variable list is specified (in \texttt{variables} or \texttt{values} mode), \texttt{autolabel} attempts to apply labels to all variables in the dataset that are found in the metadata.
+
+\subsection{Options}
+
+\begin{description}
+  \item[\texttt{domain(<string>)}]
+    Specifies the metadata domain (required). Domains can be user-created or accessed from centralized repositories; see Section~6 for domain structure.
+
+  \item[\texttt{lang(<string>)}]
+    Specifies the label language (required). Available languages depend on the CSV metadata files provided for each domain.
+
+  \item[\texttt{exclude(<varlist>)}]
+    Excludes specified variables from labeling.
+
+  \item[\texttt{suffix(<string>)}]
+    Stores labeled variables as new variables with the given suffix, preserving the original dataset.
+
+\end{description}
+
+\subsection{Scope and intended use cases}
+
+\texttt{autolabel} is designed for datasets with standardized variable naming conventions, typical of register data from national statistical agencies. The command performs case-insensitive string matching between dataset variables and metadata entries.
+
+The \texttt{exclude()} option allows researchers to label all matching variables except a specified subset. The \texttt{suffix()} option enables non-destructive exploration, creating labeled copies of variables for inspection before committing to changes.
+
+The command's case-insensitive matching ensures deterministic, auditable metadata application: given the same metadata repository and dataset variable names, \texttt{autolabel} produces identical results across platforms and time.
+
+\subsection{Metadata files and directory structure}
+
+\texttt{autolabel} reads metadata from CSV files cached locally in \texttt{\textasciitilde/.registream/} (macOS/Linux) or \texttt{C:/Users/.../AppData/Local/registream/} (Windows). Missing files trigger a download prompt using Stata's \texttt{copy} command.
+
+In secure or restricted computing environments where direct file downloads are not permitted or where default directory locations are not accessible, users can manually transfer metadata files and specify a custom path via \texttt{\$registream\_dir}. Metadata files follow standard folder conventions, stored as \texttt{\textasciitilde/.registream/autolabel\_keys/scb\_variables\_eng.csv} and \texttt{\textasciitilde/.registream/autolabel\_keys/scb\_value\_labels\_eng.csv}. Metadata updates in restricted environments follow institutional procedures: authorized personnel transfer updated files to the system, with version tracking maintained through institutional version management systems.
+
+\texttt{autolabel} automatically detects the operating system and resolves appropriate directories on macOS, Windows, and Linux.
+
+\textbf{Note on submission materials:} This submission contains the \texttt{autolabel} module from RegiStream v2.0.0 using schema 1.0.
+
+
+
+
+
+\section{Implementation: A reproducibility pattern for safe labeling}
+
+Beyond its specific application, \texttt{autolabel} introduces a generalizable pattern for safe post-inspection transformations in Stata workflows. This \emph{deferred execution pattern} uses temporary do-files inside a preserved session to separate inspection logic from application logic. The command must inspect the dataset to determine which variables to label and what transformations to apply, but these inspection steps themselves would modify the dataset. The solution: write labeling commands to a temporary do-file during inspection, restore the original dataset, then execute the commands. This ensures full reproducibility and auditability. The pattern emerged after alternative approaches (storing locals/globals during inspection, looping post-restore, direct encoding) proved brittle or opaque in production use.
+
+The pattern applies beyond metadata labeling to any workflow requiring conditional command generation, including survey harmonization, quality control routines generating conditional recoding commands, or transformations applied after multi-dataset inspection.
+
+\subsection{The problem: safe labeling after inspection}
+
+Unlike tools such as \texttt{metaxl}, which reapply metadata to datasets already sharing an identical structure, \texttt{autolabel} must reconcile external metadata with datasets that may differ in variable type, naming, or coding. In practice, statistical agencies may deliver register data in varying formats: metadata might specify numeric types but agencies deliver strings, type specifications may be inconsistent across extractions, or coding schemes may evolve over time. Variables often require encoding to numeric form before value labels can be applied. Metadata repositories often include multiple versions of the same value-label groups reflecting updates across years or agencies.
+
+To apply labels correctly, \texttt{autolabel} must inspect the dataset to determine which variables match available metadata, what transformations are required for each variable, and which metadata versions apply. However, inspection steps (merging metadata, subsetting variables, encoding transformations) modify the dataset structurally or in content. Applying labels during inspection risks overwriting user data, errors from altered variables, and reduced reproducibility from hard-coded intermediate steps.
+
+This creates a fundamental tension: labeling must be \emph{based on} metadata inspection but \emph{applied after} returning to the original dataset.
+
+\subsection{The solution: preserve, inspect, write, restore, execute}
+
+To solve this, \texttt{autolabel} adopts a deferred execution strategy consisting of five steps:
+
+\begin{enumerate}
+  \item \texttt{preserve} the dataset
+  \item Generate temporary metadata-based label commands (e.g., using merges and summaries)
+  \item Write those commands to a temporary \texttt{.do} file using \texttt{file write}
+  \item \texttt{restore} the original dataset (before any inspection or changes)
+  \item \texttt{do} the temporary file to apply all labeling commands
+\end{enumerate}
+
+The dataset is never altered during metadata inspection; all changes are applied clearly and reproducibly at once. The pattern generalizes to any workflow requiring conditional command generation based on dataset inspection: survey harmonization, quality control routines, or transformations determined by multi-dataset analysis.
+
+\subsection{Code example: variable labeling logic}
+
+The following skeleton illustrates the approach for applying variable labels. Inside a preserved session, the command merges metadata, constructs label strings, and writes commands to a temporary do-file:
+
+\begin{stlog}
+\begin{verbatim}
+preserve
+    keep `varlist'
+    merge 1:1 variable using "`var_metadata'", keep(match) nogen
+    gen label_text = variable_desc + " (" + unit + ")" if unit != ""
+
+    tempfile cmdfile
+    file open fh using `cmdfile', write replace
+    forval i = 1/`=_N' {
+        local vname = variable[`i']
+        local vlabel = label_text[`i']
+        file write fh `"label variable `vname' "`vlabel'""' _n
+    }
+    file close fh
+restore
+do `cmdfile'
+\end{verbatim}
+\end{stlog}
+
+The result is a clean application of labels, based on metadata inspection, without touching the dataset until everything is known and ready. The same pattern applies to value labels: the temporary do-file builds value label definitions and encoding commands line-by-line during inspection, then applies them after restoration.
+
+\subsection{Why this matters}
+
+This pattern offers several advantages:
+
+\begin{itemize}
+\item \textbf{Safety}: No labels applied during inspection, eliminating corruption risk
+\item \textbf{Modularity}: Label generation logic fully separated from application
+\item \textbf{Reproducibility}: Transformation is deterministic and fully traceable through metadata files
+\item \textbf{Auditability}: Applied labels immediately inspectable via standard Stata commands (\texttt{describe}, \texttt{label list}); metadata sources remain transparent in CSV format
+\item \textbf{Automation}: Manual value labeling becomes impractical with large categorical sets (for example, hundreds of municipalities or detailed occupation codes); autolabel standardizes this process through metadata repositories, eliminating tedious manual label definition
+\item \textbf{Scalability}: The pattern's deterministic, file-based approach ensures reproducibility and auditability scale to thousands of variables; at institutional scale, manual processes become infeasible, making automation a methodological requirement rather than a convenience. The same method applies to both variable and value labels and generalizes to other post-inspection actions
+\end{itemize}
+
+This deferred execution pattern (a structured approach for safe post-inspection transformations) represents a methodological contribution to reproducible Stata programming, demonstrating how complex data transformations can be separated from their application to ensure safety and reproducibility in sensitive workflows. Scalability is not merely a performance feature but a methodological necessity: reproducibility, auditability, and automation become feasible only when metadata application scales to organizational levels.
+
+\subsection{Error handling and robustness}
+
+Variables not found in the metadata are silently skipped, allowing researchers to apply available metadata without requiring completeness. The command gracefully handles missing files, format inconsistencies, and character encoding issues without compromising dataset integrity.
+
+While the underlying tools (\texttt{preserve}, \texttt{restore}, \texttt{file write}) are familiar to experienced Stata users, their structured composition into a general-purpose reproducibility pattern has not, to our knowledge, been formally documented. The novelty lies in how they are composed to solve reproducibility and safety challenges common in metadata-rich workflows.
+
+
+
+\section{Applied examples}
+
+The following examples demonstrate \texttt{autolabel} functionality using real SCB variables and are based on the demonstration scripts provided with this submission. All examples are fully reproducible using the included data and scripts in the supplementary materials.
+
+A key advantage of \texttt{autolabel} in exploratory work is the ability to label entire datasets containing hundreds of variables in a single command. Once variable labels are applied, Stata's built-in variable search (in the Variables window) automatically searches both variable names and variable labels. This makes register data immediately explorable: researchers unfamiliar with the registry variables can search for "pension" or "income" to locate relevant variables, rather than deciphering cryptic codes like \texttt{dispink04} or \texttt{aldtjptyp}. Even those familiar with the registry benefit from this searchability, as variable names are often abbreviated or coded in ways that obscure their meaning.
+
+\subsection{Variable labeling transformation}
+
+Before applying \texttt{autolabel}, the dataset contains only cryptic variable names:
+
+\begin{stlog}
+. describe astsni2007 dispink04 kon
+
+              storage   display    value
+variable name   type    format     label      variable label
+------------------------------------------------------------
+astsni2007      str5    %9s
+dispink04       int     %9.0g
+kon             byte    %9.0g
+\end{stlog}
+
+We can apply variable labels to all matching variables in the dataset using a single command (omitting the varlist applies labels to all variables found in the metadata):
+
+\begin{stlog}
+. autolabel variables, domain(scb) lang(eng)
+\end{stlog}
+
+After running \texttt{autolabel variables}, all matching variables become immediately interpretable. The labels are now searchable in Stata's Variables window, enabling researchers to quickly locate variables by content (e.g., searching "income" or "gender") rather than memorizing cryptic variable names:
+
+\begin{stlog}
+. describe astsni2007 dispink04 kon
+
+              storage   display    value
+variable name   type    format     label      variable label
+------------------------------------------------------------
+astsni2007      str5    %9s         Industry sector for statistics, main
+dispink04       int     %9.0g       Sub-component of disposable income, 2004 definition
+kon             byte    %9.0g       Gender
+\end{stlog}
+
+\subsection{Value labeling transformation}
+
+Beyond variable labels, \texttt{autolabel} also transforms coded values into readable categories. Before applying value labels, categorical variables display only numeric codes:
+\begin{stlog}
+. tab astsni2007 in 1/100, sort
+
+  Branch of |
+   industry |
+        for |
+statistics, |
+       main |      Freq.     Percent        Cum.
+------------+-----------------------------------
+      85201 |         17       17.00       17.00
+      56100 |         13       13.00       30.00
+      85100 |         11       11.00       41.00
+      88101 |         11       11.00       52.00
+      49410 |         10       10.00       62.00
+      87301 |          9        9.00       71.00
+      00000 |          8        8.00       79.00
+      41200 |          7        7.00       86.00
+      78200 |          5        5.00       91.00
+      86102 |          5        5.00       96.00
+      47112 |          4        4.00      100.00
+------------+-----------------------------------
+      Total |        100      100.00
+\end{stlog}
+
+We can apply value labels to all matching variables with another single command:
+
+\begin{stlog}
+. autolabel values, domain(scb) lang(eng)
+\end{stlog}
+
+After applying value labels, all matching coded variables become immediately readable (note that Stata's \texttt{tab} command truncates long labels in display):
+\begin{stlog}
+. tab astsni2007 in 1/100, sort
+
+   Industry sector for statistics, main |      Freq.     Percent        Cum.
+----------------------------------------+-----------------------------------
+    Primary schools and nursery schools |         17       17.00       17.00
+             Food and beverage services |         13       13.00       30.00
+                            Pre-schools |         11       11.00       41.00
+Home care services, day-care centres an |         11       11.00       52.00
+  Vehicles for the transport of persons |         10       10.00       62.00
+Service houses, serviced apartments for |          9        9.00       71.00
+                                Unknown |          8        8.00       79.00
+Residential and other building contract |          7        7.00       86.00
+                    Employment agencies |          5        5.00       91.00
+End-of-life clinics for somatic health  |          5        5.00       96.00
+  Grocery stores with a wide assortment |          4        4.00      100.00
+----------------------------------------+-----------------------------------
+                                  Total |        100      100.00
+\end{stlog}
+
+\vspace{0.5em}
+\noindent This labeling process required no manual mapping. \texttt{autolabel} parses metadata and emits native \texttt{label define}/\texttt{label values} statements; work scales with metadata size and is independent of the number of observations, so overhead is negligible (i.e., interactive time). The primary value is eliminating the tedious process of manually cross-referencing documentation, typing label definitions, and debugging syntax for each variable and categorical code. For register datasets with hundreds of variables, this automation meaningfully reduces manual effort and potential for transcription errors. An additional advantage is instant language switching: by changing the \texttt{lang()} parameter, researchers can produce outputs in different languages without modifying data or analysis code, valuable for international collaboration or multilingual reporting.
+
+The \texttt{exclude()} and \texttt{suffix()} options provide additional flexibility: \texttt{exclude()} skips specific variables when labeling all others, while \texttt{suffix()} creates labeled copies for non-destructive exploration before committing to permanent changes.
+
+\subsection{Looking up metadata without modifying the dataset}
+
+The \texttt{lookup} mode provides metadata inspection without modifying the dataset. This operates entirely offline by reading directly from local CSV metadata files, making it useful for exploring variable definitions and value label mappings before applying labels.
+
+\begin{stlog}
+. autolabel lookup sun2000niva carb aldtjptyp, domain(scb) lang(eng)
+Looking up variables in domain scb using language eng
+------------------------------------------------------------------------------
+| VARIABLE:     sun2000niva
+| LABEL:        Education level (3 positions)
+| DEFINITION:   The level of education according to the Swedish Educational
+|               Nomenclature (SUN 2000). Full level code, three positions.
+| VALUE LABELS: 000: Other and unspecified preschool education
+|               001: Preschool
+|               002: Preschool class
+|               100: Other and unspecified upper secondary education
+|               102: Primary school education, grades 1-6
+|               106: Public school education
+|               200: Other and unspecified pre-secondary education
+|               204: Secondary school education
+|               (and 46 more labels)
+------------------------------------------------------------------------------
+------------------------------------------------------------------------------
+| VARIABLE:     carb
+| LABEL:        Labor income
+| DEFINITION:   The sum of salary, business income, sickness benefit, parental
+|               benefit and compensation in connection with military service.
+------------------------------------------------------------------------------
+------------------------------------------------------------------------------
+| VARIABLE:     aldtjptyp
+| LABEL:        Retirement/service pension, existence of
+| DEFINITION:   Indicates if the person received income during the year due to
+|               retirement or occupational pension.
+| VALUE LABELS: 0: No
+|               1: Yes
+------------------------------------------------------------------------------
+\end{stlog}
+
+
+
+
+
+
+\section{Metadata file structure and domain specification}
+
+Each domain in RegiStream (e.g., \texttt{scb}, \texttt{health\_survey}, etc.) must contain two CSV files: \texttt{\textit{domain\_name}\_variables\_\textit{lang}.csv} contains metadata for each variable, including name, description, and value label group (if applicable), while \texttt{\textit{domain\_name}\_value\_labels\_\textit{lang}.csv} contains value labels for coded variables.
+
+Here is a sample from \texttt{scb\_variables\_eng.csv}:
+
+\vspace{0.5em}
+\noindent
+{\small
+\begin{tabular}{@{}llp{5.5cm}cl@{}}
+\hline
+\texttt{variable\_name} & \texttt{variable\_label} & \texttt{variable\_definition} & \texttt{...} & \texttt{value\_label\_id} \\
+\hline
+\texttt{kommun} & Municipality & Regional division into municipalities. & \texttt{...} & \texttt{3} \\
+\texttt{kon} & Gender & The sex of the person. & \texttt{...} & \texttt{1} \\
+\texttt{lopnr} & Serial number & The serial number. & \texttt{...} & \\
+\hline
+\end{tabular}
+}
+\vspace{0.5em}
+
+The \texttt{value\_label\_id} column links variables to their value label definitions. For example, \texttt{kommun} has \texttt{value\_label\_id=3}, indicating it uses value label group 3. Variables without value labels (like \texttt{lopnr}) have this field empty.
+
+And the corresponding rows from \texttt{scb\_value\_labels\_eng.csv}:
+
+\vspace{0.5em}
+\noindent
+{\small
+\begin{tabular}{@{}clp{6cm}c@{}}
+\hline
+\texttt{value\_label\_id} & \texttt{variable\_name} & \texttt{value\_labels\_stata} & \texttt{value\_labels\_json} \\
+\hline
+\texttt{3} & \texttt{kommun} & \texttt{"0114" "Upplands V\"{a}sby" "0115" "Vallentuna" ...} & \texttt{\{...\}} \\
+\texttt{1} & \texttt{kon} & \texttt{"K" "Female" "M" "Male" ...} & \texttt{\{...\}} \\
+\hline
+\end{tabular}
+}
+\vspace{0.5em}
+
+The \texttt{value\_labels\_stata} column contains value labels in Stata's native format (alternating codes and labels), while \texttt{value\_labels\_json} stores the same mappings in JSON format for cross-platform use. The \texttt{value\_label\_id} serves as the linking key: when \texttt{autolabel} processes \texttt{kommun}, it looks up \texttt{value\_label\_id=3} in the value labels file to retrieve the appropriate municipality codes and labels.
+
+The RegiStream project provides metadata infrastructure across multiple programming environments (Stata, Python, R), requiring a language-agnostic interchange format. CSV files are human-readable, version-controllable via Git, and impose no proprietary software dependencies. This design contrasts with approaches that embed labels inside .dta files (e.g., \texttt{mlanguage}), which tie metadata to individual datasets and prevent reuse across projects.
+
+\subsection{Programmatic generation for institutional metadata}
+
+These CSV files are designed to be programmatically compiled from institutional metadata systems, not manually created. Statistical agencies and research organizations typically maintain metadata in databases or documentation systems; \texttt{autolabel}'s CSV format enables automated export from these systems. For example, the SCB domain metadata was compiled programmatically from Statistics Sweden's documentation. This approach scales to thousands of variables and differs fundamentally from tools like \texttt{metaxl}, which facilitate manual metadata entry and harmonization via Excel interfaces. While \texttt{metaxl} excels at researcher-level metadata curation for specific projects, \texttt{autolabel}'s CSV infrastructure targets organizational-scale metadata distribution, where metadata is generated once by institutions and reused across projects. Researchers can inspect metadata provenance, track changes over time via version control, and contribute corrections upstream without touching analysis datasets.
+
+The metadata files support offline use in secure environments. Researchers can copy, modify, and create their own metadata files using the same structure.
+
+The domain structure is fully general, extending beyond register data to any metadata-rich domain: survey data, clinical trials, or administrative records from any institution.
+
+
+\section{Conclusion}
+
+This paper introduced \texttt{autolabel}, a Stata command that automates the application of variable and value labels from centralized metadata repositories. The command establishes a foundation for treating metadata as shared infrastructure rather than per-dataset documentation.
+
+\subsection{Contributions}
+
+The command makes three integrated contributions to Stata metadata workflows:
+
+\textbf{Technical contribution:} The deferred execution pattern (Section~4) solves a fundamental challenge in metadata workflows: how to safely apply labels when inspection requires dataset modification. This structured composition of \texttt{preserve}, \texttt{restore}, and \texttt{file write} generalizes beyond metadata labeling to any workflow requiring inspection-based command generation, including survey harmonization and quality control routines.
+
+\textbf{Architectural contribution:} The domain-agnostic metadata schema with CSV-based repositories (Section~6) operates at institutional scale. The SCB domain demonstrates this with nearly 28,000 variable entries programmatically compiled from Statistics Sweden's documentation systems. Organizations can similarly export their metadata into standardized CSV repositories, treating metadata as shared infrastructure rather than per-dataset documentation. This design enables instant language switching across entire projects without dataset modification.
+
+\textbf{Practical contribution:} Section~5 demonstrates that external metadata can be applied automatically at scale to register data. With a single command, researchers can label entire datasets containing hundreds of variables, making them immediately explorable through Stata's variable search. The command eliminates tedious manual labeling for large categorical sets like municipalities or occupation codes, transforming metadata application from a manual, error-prone process into automated, reproducible infrastructure. Scalability enables the methodological benefits of reproducibility, auditability, and automation to extend from individual projects to organizational and cross-national research infrastructure.
+
+Together, these contributions establish the feasibility of centralized metadata repositories as infrastructure for reproducible research with administrative microdata.
+
+\subsection{Future extensions}
+
+The metadata schema will continue to evolve and improve in response to institutional and cross-agency needs. Future versions could accommodate additional metadata dimensions including temporal variation (definitions changing across years), harmonization provenance (documenting resolution decisions when conflicting metadata exists), and validation metadata (confidence scores, quality indicators).
+
+A natural convergence point exists with metadata harmonization workflows. Tools like \texttt{metaxl} extract and harmonize metadata across institutional data extractions. Future schema versions could standardize ingestion of harmonized outputs, creating an integrated pipeline: institutions harmonize metadata locally, export to standardized format, and centralized repositories serve the research community. This would transform one-time harmonization efforts into shared infrastructure.
+
+\subsection{Global perspective}
+
+The domain-agnostic architecture enables expansion to statistical agencies worldwide. National statistical offices that maintain register data could programmatically compile their metadata systems into the standardized CSV format, making their documentation instantly accessible to researchers. International organizations like the World Bank, OECD, Eurostat, and UN agencies could similarly export their metadata repositories, enabling researchers to apply standardized labels to cross-national datasets with a single command. This transforms scattered institutional documentation into shared metadata infrastructure operating at global scale.
+
+\subsection*{Availability}
+
+Upon publication, \texttt{autolabel} will be available through the Stata Journal website and SSC archive. This is a standalone version containing core labeling functionality, derived from RegiStream v2.0.0. A fuller-featured version with additional infrastructure (usage logging, automatic updates, configuration management) is available as part of the RegiStream package. Additional domains can be created following Section~6.
