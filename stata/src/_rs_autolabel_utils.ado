@@ -626,23 +626,23 @@ program define _al_fetch, rclass
 
 			* Extract "message" field from JSON (simple parsing)
 			* Pattern: "message": "Some error message"
-			if (regexm(`"`json_content'"', `""message"[[:space:]]*:[[:space:]]*"([^"]+)""')) {
+			if (regexm(`"`json_content'"', `""message"*:*"([^"]+)""')) {
 				local api_message = regexs(1)
 			}
 
 			* Extract "suggestion" field if present
-			if (regexm(`"`json_content'"', `""suggestion"[[:space:]]*:[[:space:]]*"([^"]+)""')) {
+			if (regexm(`"`json_content'"', `""suggestion"*:*"([^"]+)""')) {
 				local suggestion = regexs(1)
 			}
 
 			* Extract "available_languages" or "available_domains" array if present
 			* Pattern: "available_languages": ["eng", "swe"] or "available_domains": ["scb"]
-			if (regexm(`"`json_content'"', `""available_languages"[[:space:]]*:[[:space:]]*\[([^\]]+)\]"')) {
+			if (regexm(`"`json_content'"', `""available_languages"*:*\[([^\]]+)\]"')) {
 				local available_options = regexs(1)
 				* Strip quotes from array elements: "eng", "swe" -> eng, swe
 				local available_options : subinstr local available_options `"""' "", all
 			}
-			else if (regexm(`"`json_content'"', `""available_domains"[[:space:]]*:[[:space:]]*\[([^\]]+)\]"')) {
+			else if (regexm(`"`json_content'"', `""available_domains"*:*\[([^\]]+)\]"')) {
 				local available_options = regexs(1)
 				* Strip quotes from array elements
 				local available_options : subinstr local available_options `"""' "", all
@@ -1004,34 +1004,36 @@ program define _al_check_updates, rclass
 	_rs_utils get_api_host
 	local api_host "`r(host)'"
 
-	* Construct info endpoint to get latest version
-	local info_url "`api_host'/api/v1/datasets/`domain'/`type'/`lang'/latest/info"
+	* Construct info endpoint to get latest version with Stata format
+	local info_url "`api_host'/api/v1/datasets/`domain'/`type'/`lang'/latest/info?format=stata"
 
-	* Try to get version from API (Windows-compatible)
-	tempfile json_out
-	cap qui shell curl -s -f -m 5 "`info_url'" > "`json_out'"
-	local curl_rc = _rc
+	* Try to get version from API (native Stata copy - Windows compatible, no shell commands)
+	tempfile response
+	cap copy "`info_url'" "`response'", replace
+	local copy_rc = _rc
 
 	* Check if API call succeeded
-	if (`curl_rc' != 0) {
+	if (`copy_rc' != 0) {
 		* API unreachable or dataset not on API
 		return scalar checked = 1
 		return local status "api_error"
 		exit 0
 	}
 
-	* Read and parse API version
+	* Parse Stata format response (key=value pairs, one per line)
 	local api_version = ""
 	tempname fh
-	cap file open `fh' using "`json_out'", read text
+	cap file open `fh' using "`response'", read text
 	if (_rc == 0) {
-		file read `fh' json_line
-		file close `fh'
-
-		* Extract version with Stata's regexm (no grep/cut needed)
-		if regexm(`"`json_line'"', `""version"[ ]*:[ ]*"([^"]+)""') {
-			local api_version = regexs(1)
+		file read `fh' line
+		while (r(eof) == 0) {
+			* Parse version=YYYYMMDD
+			if (regexm("`line'", "^version=(.+)$")) {
+				local api_version = trim(regexs(1))
+			}
+			file read `fh' line
 		}
+		file close `fh'
 	}
 
 	* Case 1: Dataset NOT in datasets.csv but exists locally
@@ -1405,38 +1407,37 @@ program define _al_get_latest_version, rclass
 	* (Avoids dev override check which causes batch mode issues)
 	local api_host "https://registream.org"
 
-	* Construct info endpoint
-	local info_url "`api_host'/api/v1/datasets/`domain'/`type'/`lang'/latest/info"
+	* Construct info endpoint with Stata format
+	local info_url "`api_host'/api/v1/datasets/`domain'/`type'/`lang'/latest/info?format=stata"
 
-	* Try to get version info from API (use curl, parse with Stata - Windows compatible)
-	tempfile json_out
-	cap qui shell curl -s -f -m 5 "`info_url'" > "`json_out'"
-	local curl_rc = _rc
+	* Try to get version info from API (native Stata copy - Windows compatible, no shell commands)
+	tempfile response
+	cap copy "`info_url'" "`response'", replace
+	local copy_rc = _rc
 
-	if (`curl_rc' == 0) {
-		* Read and parse JSON response (Windows-compatible, no grep/cut needed)
+	if (`copy_rc' == 0) {
+		* Parse Stata format response (key=value pairs, one per line)
 		local api_version = ""
 		local api_schema = ""
 
-		* Use file read to get JSON content
 		tempname fh
-		cap file open `fh' using "`json_out'", read text
+		cap file open `fh' using "`response'", read text
 		if (_rc == 0) {
-			file read `fh' json_line
-			local read_rc = _rc
-			file close `fh'
-
-			if (`read_rc' == 0) {
-				* Extract version: look for "version":"..." or "version": "..."
-				if regexm(`"`json_line'"', `""version"[ ]*:[ ]*"([^"]+)""') {
-					local api_version = regexs(1)
+			file read `fh' line
+			while (r(eof) == 0) {
+				* Parse version=YYYYMMDD
+				if (regexm("`line'", "^version=(.+)$")) {
+					local api_version = trim(regexs(1))
 				}
 
-				* Extract schema: look for "schema":"..." or "schema": "..."
-				if regexm(`"`json_line'"', `""schema"[ ]*:[ ]*"([^"]+)""') {
-					local api_schema = regexs(1)
+				* Parse schema=X.Y
+				else if (regexm("`line'", "^schema=(.+)$")) {
+					local api_schema = trim(regexs(1))
 				}
+
+				file read `fh' line
 			}
+			file close `fh'
 		}
 
 		if ("`api_version'" != "") {

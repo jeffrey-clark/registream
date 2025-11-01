@@ -36,16 +36,16 @@ end
 program define _config_path, rclass
 	args dir
 
-	local config_file "`dir'/config.yaml"
+	local config_file "`dir'/config_stata.yaml"
 	return clear
 	return local config_file "`config_file'"
 end
 
-* Initialize config.yaml if it doesn't exist
+* Initialize config_stata.yaml if it doesn't exist
 program define _config_init, rclass
 	args dir
 
-	local config_file "`dir'/config.yaml"
+	local config_file "`dir'/config_stata.yaml"
 
 	* Check if config already exists and has valid content
 	if (fileexists("`config_file'")) {
@@ -181,10 +181,10 @@ program define _config_init, rclass
 	* (internet enabled, online telemetry enabled, for testing usage tracking endpoint)
 
 	* ═══════════════════════════════════════════════════════════════════════
-	* Create config.yaml with user's choices
+	* Create config_stata.yaml with user's choices
 	* ═══════════════════════════════════════════════════════════════════════
 
-	* Try to write initial config.yaml
+	* Try to write initial config_stata.yaml
 	cap file close configfile
 	cap file open configfile using "`config_file'", write replace
 	if (_rc != 0) {
@@ -223,7 +223,7 @@ end
 program define _config_get, rclass
 	args dir key
 
-	local config_file "`dir'/config.yaml"
+	local config_file "`dir'/config_stata.yaml"
 
 	* Check if config exists
 	if (!fileexists("`config_file'")) {
@@ -271,7 +271,7 @@ end
 program define _config_set, rclass
 	args dir key value
 
-	local config_file "`dir'/config.yaml"
+	local config_file "`dir'/config_stata.yaml"
 
 	* Check if config exists
 	if (!fileexists("`config_file'")) {

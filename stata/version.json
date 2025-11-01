@@ -1,6 +1,30 @@
 {
-  "current_version": "2.0.1",
+  "current_version": "2.0.2",
   "versions": [
+    {
+      "version": "2.0.2",
+      "platform": "stata",
+      "release_date": "2025-11-01",
+      "type": "patch",
+      "notes": "API format improvements and multi-platform config separation",
+      "highlights": [
+        "Added format=stata API parameter support (simple key=value parsing replaces complex JSON regex)",
+        "Separated config files by platform (config_stata.yaml) for future R/Python packages",
+        "Fixed file read pattern bug in API response parsing"
+      ],
+      "breaking_changes": [],
+      "bug_fixes": [
+        "Fixed JSON regex parsing incompatibility (Stata doesn't support POSIX character classes like [[:space:]])",
+        "Fixed file read pattern causing empty API responses (read-then-check EOF vs check-then-read)",
+        "All API endpoints now return Stata-optimized format for reliable parsing"
+      ],
+      "improvements": [
+        "Replaced complex JSON regex with simple line-by-line key=value parsing",
+        "Native Stata copy command for downloads (removed shell curl dependencies)",
+        "Config file separation prevents cross-platform overwrites (config_stata.yaml)"
+      ],
+      "github_release": "https://github.com/jeffrey-clark/registream/releases/tag/v2.0.2-stata"
+    },
     {
       "version": "2.0.1",
       "platform": "stata",
