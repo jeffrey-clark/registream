@@ -2,6 +2,70 @@
 
 ---
 
+## v2.0.1 - Dataset Version Override Bug Fix (2025-11-01)
+
+### Critical Bug Fix
+
+**Version Parameter Not Working in Dataset Updates**
+
+- **Bug:** Users could not download specific dataset versions using `version()` parameter - system always downloaded latest version instead
+- **Root Cause:** When updating datasets with `version()` parameter:
+  1. Update command deletes existing files to force re-download
+  2. Files are gone, but metadata (datasets.csv) still shows previous version
+  3. Integrity check sees "missing files with metadata" → triggers recovery flow
+  4. Recovery flow pings API for latest version, returns it to caller
+  5. **Bug #1:** Version parameter not transmitted (missing quotes in parameter passing)
+  6. **Bug #2:** Integrity check's returned version overrides user's requested version
+  7. Downloads latest version (e.g., 20251101) instead of requested version (e.g., 20251014)
+- **Impact:** Users unable to downgrade datasets or install specific versions for reproducibility
+- **Fix:**
+  1. Added quotes when passing parameters: `domain("`domain'")` instead of `domain(`domain')`
+  2. Only override version when `version == "latest"` (don't override explicit version requests)
+  3. Only run integrity check when files exist (skip when files missing - no point checking integrity of non-existent files)
+
+**Files Modified:**
+- `stata/src/registream.ado:217` - Parameter passing fix (added quotes)
+- `stata/src/_rs_autolabel_utils.ado:122` - Only override when version is "latest"
+- `stata/src/_rs_autolabel_utils.ado:108-137` - Run integrity check only when files exist
+
+### Additional Bug Fixes
+
+**Integrity Check Too Permissive**
+
+- **Bug:** File integrity check allowed up to 5% file size difference before warning
+- **Problem:** A 1MB file could differ by 50KB and still pass integrity check - not true integrity validation
+- **Impact:** Corrupted or modified files could go undetected
+- **Fix:** Changed to exact byte match - any size difference triggers integrity warning
+- **File Modified:** `stata/src/_rs_autolabel_utils.ado:1348` - Changed from `if (size_pct > 5)` to `if (actual_size != stored_size)`
+
+### UX Improvements
+
+**Better "Already at Version" Message**
+- Changed "No datasets match the specified filters" to "All datasets are already at version {version}!" when datasets are at requested version
+- File: `stata/src/_rs_updates.ado:921`
+
+**Standardized Display Formatting**
+- All horizontal lines (`{hline}`) standardized to 60 dashes for consistency across all commands
+- Files: All `.ado` files (60 total occurrences)
+  - `_rs_config.ado`: Fixed 3 lines (were 75)
+  - `_rs_updates.ado`: Fixed 3 lines (were 70)
+
+### Example Usage
+
+```stata
+* Download specific version (now works correctly)
+autolabel update datasets, domain(scb) lang(eng) version(20251014)
+
+* Downgrade to older version
+autolabel update datasets, domain(scb) version(20241001)
+
+* Friendly message when already at requested version
+autolabel update datasets, domain(scb) version(20251014)
+> "All datasets are already at version 20251014!"
+```
+
+---
+
 ## v2.0.0 - HOTFIX Amendment (2025-10-23)
 
 **⚠️ IMPORTANT: This is a sneaky hotfix applied to the v2.0.0 release (already distributed)**

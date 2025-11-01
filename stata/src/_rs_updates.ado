@@ -737,11 +737,13 @@ end
 * -----------------------------------------------------------------------------
 * update_datasets_interactive: Interactive workflow for updating datasets
 * Checks for updates, displays list, prompts for selection, downloads
-* Args: registream_dir, domain(optional), lang(optional)
+* Args: registream_dir, domain(optional), lang(optional), version(optional)
 * -----------------------------------------------------------------------------
 program define _upd_update_datasets_interactive, rclass
-	syntax anything [, DOMAIN(string) LANG(string)]
+	syntax anything [, DOMAIN(string) LANG(string) VERSION(string)]
 	local registream_dir `anything'
+
+	local autolabel_dir "`registream_dir'/autolabel_keys"
 
 	* Check internet access setting
 	_rs_config get "`registream_dir'" "internet_access"
@@ -754,8 +756,7 @@ program define _upd_update_datasets_interactive, rclass
 	}
 
 	* Read datasets.csv to get current versions
-	local meta_csv "`registream_dir'/autolabel_keys/datasets.csv"
-	local autolabel_dir "`registream_dir'/autolabel_keys"
+	local meta_csv "`autolabel_dir'/datasets.csv"
 
 	tempfile response_body
 
@@ -852,14 +853,39 @@ program define _upd_update_datasets_interactive, rclass
 		exit 0
 	}
 
-	* Filter to only show updates
-	keep if update_available == "1"
+	* If user specified a version, override latest_version BEFORE filtering
+	if ("`version'" != "") {
+		* Normalize version format (remove 'v' prefix if present)
+		local target_version = "`version'"
+		if (regexm("`target_version'", "^v(.+)$")) {
+			local target_version = regexs(1)
+		}
+
+		* Override all latest versions with the user-specified version
+		qui replace latest_version = "`target_version'"
+	}
+
+	* Filter to only show updates/changes
+	if ("`version'" == "") {
+		* Normal mode: only show datasets with updates available
+		qui keep if update_available == "1"
+	}
+	else {
+		* Version specified: keep datasets where current != target
+		* (Skip datasets already at target version - no point re-downloading)
+		qui keep if current_version != latest_version
+	}
 
 	local updates_count = _N
 
 	if (`updates_count' == 0) {
 		restore
-		di as result "All datasets are up to date!"
+		if ("`version'" != "") {
+			di as result "All datasets are already at version `target_version'!"
+		}
+		else {
+			di as result "All datasets are up to date!"
+		}
 		return scalar updates_downloaded = 0
 		return local reason "no_updates"
 		exit 0
@@ -876,25 +902,48 @@ program define _upd_update_datasets_interactive, rclass
 
 	restore
 
+	* Set display note if version was specified
+	if ("`version'" != "") {
+		* target_version was already set earlier
+		local version_note " (target version: `target_version')"
+	}
+	else {
+		local version_note ""
+	}
+
 	* Display numbered list of updates
 	di as text ""
-	di as text "Available Updates:"
-	di as text "{hline 70}"
+	if ("`version'" != "") {
+		di as text "Available Datasets`version_note':"
+	}
+	else {
+		di as text "Available Updates:"
+	}
+	di as text "{hline 60}"
 	forval i = 1/`updates_count' {
 		local ds_key "`upd_`i'_domain'_`upd_`i'_type'_`upd_`i'_lang'"
 		di as text %3.0f `i' ".  {result:`ds_key'}"
-		di as text "     Current: `upd_`i'_current' → Latest: `upd_`i'_latest'"
+		di as text "     Current: `upd_`i'_current' → Target: `upd_`i'_latest'"
 	}
-	di as text "{hline 70}"
+	di as text "{hline 60}"
 	di as text ""
 
 	* Prompt for selection (NOW outside preserve/restore)
-	di as text "Enter dataset numbers to update (comma-separated) or 'all':"
+	di as text "Enter dataset numbers to update (comma-separated), 'all', or 'cancel':"
 	di as input "> " _request(rsinput)
 
 	* _request MUST use global (Stata limitation), copy to local and clear
-	local user_input = trim("$rsinput")
+	local user_input = trim(lower("$rsinput"))
 	global rsinput ""
+
+	* Check for cancel/quit
+	if ("`user_input'" == "cancel" | "`user_input'" == "q" | "`user_input'" == "quit" | "`user_input'" == "") {
+		di as text ""
+		di as text "Update cancelled"
+		return scalar updates_downloaded = 0
+		return local reason "cancelled"
+		exit 0
+	}
 
 	* Handle 'all' selection
 	if ("`user_input'" == "all") {
@@ -928,6 +977,7 @@ program define _upd_update_datasets_interactive, rclass
 
 		if (`selection_count' == 0) {
 			di as error "No valid selections provided"
+			di as text "Hint: Enter 'all', specific numbers like '1,2', or 'cancel'"
 			return scalar updates_downloaded = 0
 			return local reason "invalid_selection"
 			exit 0
@@ -939,9 +989,9 @@ program define _upd_update_datasets_interactive, rclass
 
 	* Download selected datasets
 	di as text ""
-	di as result "{hline 70}"
+	di as result "{hline 60}"
 	di as result "Downloading Updates..."
-	di as result "{hline 70}"
+	di as result "{hline 60}"
 
 	local downloaded_count = 0
 
@@ -983,7 +1033,8 @@ program define _upd_update_datasets_interactive, rclass
 			file("`filename'") ///
 			registream_dir("`registream_dir'") ///
 			autolabel_dir("`autolabel_dir'") ///
-			clean("`ds_type'")
+			clean("`ds_type'") ///
+			version("`ds_latest'")
 
 		if (_rc == 0) {
 			di as result "  ✓ Downloaded successfully"
@@ -995,10 +1046,9 @@ program define _upd_update_datasets_interactive, rclass
 	}
 
 	di as text ""
-	di as result "{hline 70}"
+	di as result "{hline 60}"
 	di as result "Update Complete: `downloaded_count'/`selection_count' dataset(s) updated"
-	di as result "{hline 70}"
-	di as text ""
+	di as result "{hline 60}"
 
 	return scalar updates_downloaded = `downloaded_count'
 	return local reason "success"

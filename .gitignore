@@ -16,9 +16,6 @@ python/dist/*
 python/build/*
 python/src/registream.egg-info/*
 
-stata_journal_submission/*
-paper/*
-stata_journal_submission_notes/*
 
 # Development configuration (never commit)
 # These files can contain API host overrides and batch mode settings

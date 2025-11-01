@@ -104,21 +104,36 @@ program define _al_download, rclass
 	}
 
 	* Verify file integrity first (checks existence, metadata, size)
-	* This will prompt user if issues are detected
-	_rs_autolabel_utils verify_file_integrity "`autolabel_dir'" "`check_domain'" "`check_type'" "`check_lang'" "`csv'" "`dta'"
-	local should_download = r(should_download)
-	local user_already_approved = r(user_approved)
-	local integrity_version "`r(download_version)'"
+	* Only check if files actually exist - no point checking integrity of missing files
+	cap confirm file "`csv'"
+	local csv_exists = (_rc == 0)
+	cap confirm file "`dta'"
+	local dta_exists = (_rc == 0)
 
-	* If integrity check returned a specific version, use it
-	if ("`integrity_version'" != "") {
-		local version "`integrity_version'"
+	if (`csv_exists' | `dta_exists') {
+		* Files exist - verify integrity before use
+		_rs_autolabel_utils verify_file_integrity "`autolabel_dir'" "`check_domain'" "`check_type'" "`check_lang'" "`csv'" "`dta'"
+		local should_download = r(should_download)
+		local user_already_approved = r(user_already_approved)
+		local integrity_version "`r(download_version)'"
+
+		* If integrity check returned a specific version, ONLY use it if version wasn't explicitly specified
+		* Don't override an explicit version request (e.g., from update command with version())
+		if ("`integrity_version'" != "" & "`version'" == "latest") {
+			local version "`integrity_version'"
+		}
+
+		* If integrity check says to download, force download by deleting existing files
+		if (`should_download' == 1) {
+			cap erase "`csv'"
+			cap erase "`dta'"
+		}
 	}
-
-	* If integrity check says to download, force download by deleting existing files
-	if (`should_download' == 1) {
-		cap erase "`csv'"
-		cap erase "`dta'"
+	else {
+		* Files don't exist - will download, no need for integrity check
+		local should_download = 0
+		local user_already_approved = 0
+		local integrity_version = ""
 	}
 
 	* Check for updates / version tracking (only if internet enabled)
@@ -138,6 +153,9 @@ program define _al_download, rclass
 		_rs_utils confirmdir "`zipfold'"
 		if (r(exists) == 1) {
 			// discovered the constituent csv files, skip download, proceed to build
+			// But still set version for metadata update
+			local downloaded_version = "`version'"
+			local downloaded_schema = "1.0"
 		}
 		else {
 			* Check if internet access is enabled before attempting download
@@ -333,6 +351,13 @@ program define _al_download, rclass
 	if (fileexists("`csv'") == 1) {
 		cap _rs_utils del_folder_rec "`zipfold'"
 		cap erase "`zip'"
+	}
+
+	* Store/update metadata if we just downloaded (downloaded_version will be set)
+	* This handles the case where CSV existed and was replaced during update
+	if ("`downloaded_version'" != "" & "`downloaded_version'" != ".") {
+		_rs_autolabel_utils store_dataset_metadata "`autolabel_dir'" "`domain'" "`type'" "`lang'" "`downloaded_version'" "`downloaded_schema'" "`csv'"
+		_rs_autolabel_utils update_last_checked "`autolabel_dir'" "`domain'" "`type'" "`lang'"
 	}
 
 	* Convert the CSV file to DTA if not already done
@@ -1317,13 +1342,12 @@ program define _al_verify_integrity, rclass
 			local actual_size = r(size)
 			if ("`actual_size'" == "" | "`actual_size'" == ".") local actual_size = 0
 
-				* Compare sizes (allow small differences due to line endings)
+				* Compare sizes - must be exact match for integrity
 				if ("`actual_size'" != "" & "`actual_size'" != ".") {
-					local size_diff = abs(`actual_size' - `stored_size')
-					local size_pct = (`size_diff' / `stored_size') * 100
-
-					* If size difference > 5%, warn user
-					if (`size_pct' > 5) {
+					* If any size difference at all, file has been modified or corrupted
+					if (`actual_size' != `stored_size') {
+						local size_diff = abs(`actual_size' - `stored_size')
+						local size_pct = (`size_diff' / `stored_size') * 100
 						di as text ""
 						di as error "{hline 60}"
 						di as error "File Size Mismatch Detected"

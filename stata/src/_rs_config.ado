@@ -93,9 +93,9 @@ program define _config_init, rclass
 	if ("$REGISTREAM_AUTO_APPROVE" != "yes") {
 		* Show first-run setup prompt
 		di as result ""
-		di as result "{hline 75}"
+		di as result "{hline 60}"
 		di as result "RegiStream - First-Time Setup"
-		di as result "{hline 75}"
+		di as result "{hline 60}"
 		di as text ""
 		di as text "Welcome to RegiStream! Before we begin, please choose your setup mode."
 		di as text ""
@@ -126,7 +126,7 @@ program define _config_init, rclass
 		di as text "Note: You can change these settings later using:"
 		di as text "  . registream config"
 		di as text ""
-		di as result "{hline 75}"
+		di as result "{hline 60}"
 		di as text ""
 
 		* Get user choice (3 options)

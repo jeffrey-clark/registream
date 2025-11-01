@@ -1,4 +1,4 @@
-*! version 2.0.0  20oct2025
+*! version 2.0.1  01nov2025
 * RegiStream: Main command entry point
 * Author: Jeffrey Clark
 *
@@ -105,8 +105,8 @@ program define _registream_update
 	_rs_utils get_version
 	local REGISTREAM_VERSION "`r(version)'"
 
-	* Parse arguments: [package|dataset|datasets] [, domain() lang()]
-	syntax [anything] [, DOMAIN(string) LANG(string)]
+	* Parse arguments: [package|dataset|datasets] [, domain() lang() version()]
+	syntax [anything] [, DOMAIN(string) LANG(string) VERSION(string)]
 	local what "`anything'"
 
 	* Normalize domain and lang to lowercase immediately (case-insensitive)
@@ -198,6 +198,14 @@ program define _registream_update
 
 	* If "dataset" or "datasets", check dataset updates
 	else if ("`what'" == "dataset" | "`what'" == "datasets") {
+		* Validate: version() requires domain()
+		if ("`version'" != "" & "`domain'" == "") {
+			di as error "Error: version() parameter requires domain() to be specified"
+			di as text ""
+			di as text "Example: autolabel update datasets, domain(scb) version(20251014)"
+			exit 198
+		}
+
 		di as result ""
 		di as result "{hline 60}"
 		di as result "RegiStream Dataset Update Check"
@@ -205,8 +213,8 @@ program define _registream_update
 		di as result ""
 
 		* Call interactive update workflow
-		if ("`domain'" != "" | "`lang'" != "") {
-			_rs_updates update_datasets_interactive "`registream_dir'", domain(`domain') lang(`lang')
+		if ("`domain'" != "" | "`lang'" != "" | "`version'" != "") {
+			_rs_updates update_datasets_interactive "`registream_dir'", domain("`domain'") lang("`lang'") version("`version'")
 		}
 		else {
 			_rs_updates update_datasets_interactive "`registream_dir'"

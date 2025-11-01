@@ -1,6 +1,27 @@
 {
-  "current_version": "2.0.0",
+  "current_version": "2.0.1",
   "versions": [
+    {
+      "version": "2.0.1",
+      "platform": "stata",
+      "release_date": "2025-11-01",
+      "type": "patch",
+      "notes": "Dataset version override bug fix",
+      "highlights": [
+        "Fixed critical bug preventing specific version downloads with version() parameter",
+        "Root cause: Update deletes files → metadata still exists → integrity check recovery flow overrides requested version",
+        "Improved UX: Better 'already at version' message",
+        "Standardized all horizontal lines to 60 dashes for consistency"
+      ],
+      "breaking_changes": [],
+      "bug_fixes": [
+        "Bug #1: Parameter passing - Added quotes when passing domain/lang/version parameters",
+        "Bug #2: Integrity check - Only override user-requested version when version is 'latest'",
+        "Bug #3: Integrity check - Skip when files don't exist (no point checking integrity of missing files)",
+        "Bug #4: Integrity check - Changed from 5% tolerance to exact byte match (actual_size != stored_size)"
+      ],
+      "github_release": "https://github.com/jeffrey-clark/registream/releases/tag/v2.0.1-stata"
+    },
     {
       "version": "2.0.0",
       "platform": "stata",
