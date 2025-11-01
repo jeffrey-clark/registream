@@ -271,7 +271,7 @@ program define _registream_info
 	di as result "RegiStream Configuration"
 	di as result "{hline 60}"
 	di as text "Directory:        {result:`registream_dir'}"
-	di as text "Config file:      {result:`registream_dir'/config.yaml}"
+	di as text "Config file:      {result:`registream_dir'/config_stata.yaml}"
 	di as text ""
 	di as text "Package:"
 	di as text "  version:         {result:`REGISTREAM_VERSION'}"

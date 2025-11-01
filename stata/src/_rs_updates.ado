@@ -94,12 +94,12 @@ program define _upd_check_package, rclass
 	_rs_utils get_api_host
 	local api_host "`r(host)'"
 
-	* Construct version check endpoint
-	local version_url "`api_host'/api/v1/stata/version"
+	* Construct version check endpoint with Stata format
+	local version_url "`api_host'/api/v1/stata/version?format=stata"
 
 	* Fetch latest version from API using native Stata copy (no shell commands)
-	tempfile version_json
-	cap copy "`version_url'" "`version_json'", replace
+	tempfile version_response
+	cap copy "`version_url'" "`version_response'", replace
 	if (_rc != 0) {
 		* Network error or timeout
 		return scalar update_available = 0
@@ -109,23 +109,23 @@ program define _upd_check_package, rclass
 		exit 0
 	}
 
-	* Parse JSON response to get latest version (preserve/restore to avoid corrupting user's dataset)
+	* Parse Stata format response (key=value pairs, one per line)
 	local latest_version ""
-	preserve
-	cap qui infix strL json_line 1-5000 using "`version_json'", clear
-	if (_rc == 0 & _N > 0) {
-		* Extract version number using simple pattern that matches semantic version format
-		* This avoids issues with quote escaping in Stata regex
-		* Pattern: X.Y.Z where X, Y, Z are numbers (e.g., "1.0.1", "1.2.10")
-		qui gen matched = regexm(json_line, "([0-9]+\.[0-9]+\.[0-9]+)")
-		if (matched[1] == 1) {
-			* IMPORTANT: Extract to local BEFORE restore, as regexs() is dataset-dependent
-			local latest_version = regexs(1)
+	tempname fh
+	cap file open `fh' using "`version_response'", read text
+	if (_rc == 0) {
+		file read `fh' line
+		while (r(eof) == 0) {
+			* Parse version=X.Y.Z
+			if (regexm("`line'", "^version=(.+)$")) {
+				local latest_version = trim(regexs(1))
+			}
+			file read `fh' line
 		}
+		file close `fh'
 	}
-	restore
 
-	* Check if version was successfully extracted (after restore)
+	* Check if version was successfully extracted
 	if ("`latest_version'" == "") {
 		return scalar update_available = 0
 		return local current_version "`current_version'"
@@ -344,13 +344,8 @@ program define _upd_send_heartbeat
 		}
 	}
 
-	* If neither telemetry nor updates needed, exit early
-	if (`send_telemetry' == 0 & `check_updates' == 0) {
-		exit 0
-	}
-
-	* If only checking updates and cache is still valid, read from cache
-	if (`send_telemetry' == 0 & `check_updates' == 0) {
+	* If cache is still valid (not checking for updates), read cached values and set globals
+	if (`check_updates' == 0) {
 		* Read cached update info from config
 		_rs_config get "`registream_dir'" "update_available"
 		if (r(found) == 1 & "`r(value)'" == "true") {
@@ -362,6 +357,15 @@ program define _upd_send_heartbeat
 			global REGISTREAM_UPDATE_AVAILABLE = 0
 			global REGISTREAM_LATEST_VERSION ""
 		}
+
+		* If also not sending telemetry, we're done
+		if (`send_telemetry' == 0) {
+			exit 0
+		}
+	}
+
+	* If neither telemetry nor updates needed, exit (cache globals already set above if needed)
+	if (`send_telemetry' == 0 & `check_updates' == 0) {
 		exit 0
 	}
 
@@ -405,11 +409,13 @@ program define _upd_send_heartbeat
 		local command_encoded : subinstr local command_encoded ")" "%29", all
 
 		* Build URL with telemetry data (always include version for proper tracking)
-		local heartbeat_url "`api_host'/api/v1/stata/heartbeat?user_id=`user_id'&command=`command_encoded'&platform=`platform'&os=`os'&platform_version=`platform_version'&timestamp=`timestamp_encoded'&version=`current_version'"
+		* Add format=stata for reliable parsing
+		local heartbeat_url "`api_host'/api/v1/stata/heartbeat?user_id=`user_id'&command=`command_encoded'&platform=`platform'&os=`os'&platform_version=`platform_version'&timestamp=`timestamp_encoded'&version=`current_version'&format=stata"
 	}
 	else {
 		* Only checking updates, no telemetry data
-		local heartbeat_url "`api_host'/api/v1/stata/heartbeat?version=`current_version'"
+		* Add format=stata for reliable parsing
+		local heartbeat_url "`api_host'/api/v1/stata/heartbeat?version=`current_version'&format=stata"
 	}
 
 	* Use native Stata copy - NO SHELL, NO FLASH!
@@ -417,25 +423,42 @@ program define _upd_send_heartbeat
 	cap copy "`heartbeat_url'" "`response'", replace
 
 	if (_rc == 0) {
-		* Parse response (simple JSON parsing for update_available)
+		* Parse Stata format response (key=value pairs, one per line)
+		* No JSON parsing needed - simple and reliable
+		local update_available ""
+		local latest_version ""
+
 		tempname fh
 		cap file open `fh' using "`response'", read text
 		if (_rc == 0) {
-			file read `fh' json_line
+			file read `fh' line
+			while (r(eof) == 0) {
+				* Parse update_available=true/false
+				if (regexm("`line'", "^update_available=(.+)$")) {
+					local update_val = trim(regexs(1))
+					if ("`update_val'" == "true") {
+						local update_available = "1"
+					}
+					else {
+						local update_available = "0"
+					}
+				}
+
+				* Parse latest_version=X.Y.Z
+				else if (regexm("`line'", "^latest_version=(.+)$")) {
+					local latest_version = trim(regexs(1))
+				}
+
+				file read `fh' line
+			}
 			file close `fh'
 
-			* Extract update_available (look for "update_available": true/false)
-			if (regexm(`"`json_line'"', `""update_available"[[:space:]]*:[[:space:]]*true"')) {
+			* Set globals and persist to config
+			if ("`update_available'" == "1") {
 				global REGISTREAM_UPDATE_AVAILABLE = 1
-
-				* Extract latest_version
-				if (regexm(`"`json_line'"', `""latest_version"[[:space:]]*:[[:space:]]*"([^"]+)""')) {
-					global REGISTREAM_LATEST_VERSION = regexs(1)
-
-					* Persist to config for cross-session notifications
-					cap _rs_config set "`registream_dir'" "update_available" "true"
-					cap _rs_config set "`registream_dir'" "latest_version" "`=regexs(1)'"
-				}
+				global REGISTREAM_LATEST_VERSION "`latest_version'"
+				cap _rs_config set "`registream_dir'" "update_available" "true"
+				cap _rs_config set "`registream_dir'" "latest_version" "`latest_version'"
 			}
 			else {
 				global REGISTREAM_UPDATE_AVAILABLE = 0
@@ -658,8 +681,8 @@ program define _upd_check_datasets, rclass
 	_rs_utils get_api_host
 	local api_host "`r(host)'"
 
-	* Construct GET URL with datasets parameter
-	local updates_url "`api_host'/api/v1/datasets/check_updates?datasets=`url_params'"
+	* Construct GET URL with datasets parameter and Stata format (CSV)
+	local updates_url "`api_host'/api/v1/datasets/check_updates?datasets=`url_params'&format=stata"
 
 	* Use native Stata copy - NO SHELL, NO FLASH!
 	cap copy "`updates_url'" "`response_body'", replace
@@ -829,8 +852,8 @@ program define _upd_update_datasets_interactive, rclass
 	_rs_utils get_api_host
 	local api_host "`r(host)'"
 
-	* Construct GET URL with datasets parameter
-	local updates_url "`api_host'/api/v1/datasets/check_updates?datasets=`url_params'"
+	* Construct GET URL with datasets parameter and Stata format (CSV)
+	local updates_url "`api_host'/api/v1/datasets/check_updates?datasets=`url_params'&format=stata"
 
 	* Use native Stata copy - NO SHELL, NO FLASH!
 	cap copy "`updates_url'" "`response_body'", replace
